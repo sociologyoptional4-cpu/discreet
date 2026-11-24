@@ -7,6 +7,7 @@ import { StoryStrip } from '@/components/StoryStrip';
 import { ClayBuddy } from '@/components/chat/AvatarStickerMessage';
 import { DailyQuestPill, StreakBadge } from '@/components/chat/ChatGamification';
 import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
+import { PinnedAIChatCard } from '@/components/chat/PinnedAIChatCard';
 import { useConversations } from '@/hooks/useConversations';
 import { AVATAR_META, isAvatarId } from '@/lib/avatars';
 import { fetchSuggestedCreators, requestConversation, type SuggestedCreator } from '@/lib/chatData';
@@ -39,6 +40,9 @@ export function ChatsScreen() {
       </header>
       <DailyQuestPill />
       <StoryStrip adding={addingStory} onAddingChange={setAddingStory} />
+      <div className="mt-3 px-4">
+        <PinnedAIChatCard />
+      </div>
 
       {incoming.length > 0 && (
         <section aria-labelledby="requests-heading" className="px-4 pt-2">
