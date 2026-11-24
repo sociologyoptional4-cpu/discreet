@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "branch": "feat/core-architecture-v2",
+  "base_commit": "329789ac6f3d29395fd837c307fe2eaf5f6b1fb2",
+  "last_verified_prior_commit_sha": "924792a42665caacdec5f97df6c5c6b443edbf01",
+  "status": "in_progress",
+  "tasks": {
+    "phase-a": "verified",
+    "phase-b": "verified",
+    "phase-c": "in_progress",
+    "phase-d": "pending",
+    "phase-e": "pending",
+    "full-verification": "pending",
+    "push-and-pr": "pending"
+  },
+  "verification": {
+    "tsc": "passed",
+    "lint": "passed, 2 warnings",
+    "build": "passed",
+    "unit": "40 passed via node --test tests/*.test.ts",
+    "sql": "migration applied twice on isolated PostgreSQL with pgvector and pg_trgm; hosted Supabase and pg_cron pending",
+    "safety_scan": "no TODO, FIXME or any escapes found in changes"
+  },
+  "next_action": "Publish feed checkpoint",
+  "updated_at": "2026-11-24T17:19:46.770Z"
+}

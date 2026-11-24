@@ -4,7 +4,7 @@ import { ensureSession } from '@/lib/session';
 import { isDemoMode, supabase } from '@/lib/supabase';
 import type { ExpiryTier } from '@/types/privacy';
 
-export type PublishInput = MediaInput & { expiryTier: ExpiryTier; isIncog: boolean };
+export type PublishInput = MediaInput & { expiryTier: ExpiryTier; isIncog: boolean; topic?: string | null };
 
 /** Called with 0..1 as bytes leave the phone. The last 5% is the database write. */
 export type ProgressHandler = (fraction: number) => void;
@@ -23,13 +23,17 @@ export function randomIncogAlias(): string {
  * Incog posts are always 1 day and carry a random `Anon_XXXXX` alias; the database enforces both again.
  */
 export async function publishPost(input: PublishInput, onProgress?: ProgressHandler): Promise<{ postId: string }> {
+  const routeTopic = typeof window !== 'undefined' && window.location.pathname === '/record'
+    ? new URLSearchParams(window.location.search).get('topic')
+    : null;
+  const topic = (input.topic ?? routeTopic)?.trim().slice(0, 160) || null;
   if (isDemoMode) {
     // Demo: nothing is uploaded. The clip is kept in memory (new object URLs, since the camera revokes its own) and shown in the feed.
     const { mode, avatarId, durationSec } = describeMedia(input);
     const mediaUrl = URL.createObjectURL(input.kind === 'mask' ? input.payload.audioBlob : input.payload.blob);
     const motion = input.kind === 'mask' ? { fps: input.payload.fps, avatarId: input.payload.avatarId, frames: input.payload.frames } : null;
     onProgress?.(1);
-    return { postId: demoAddPost({ mode, avatarId, mediaUrl, motion, durationSec, isIncog: input.isIncog, alias: input.isIncog ? randomIncogAlias() : null }) };
+    return { postId: demoAddPost({ topic, mode, avatarId, mediaUrl, motion, durationSec, isIncog: input.isIncog, alias: input.isIncog ? randomIncogAlias() : null }) };
   }
   const session = await ensureSession();
   const token = session.access_token;
@@ -43,6 +47,7 @@ export async function publishPost(input: PublishInput, onProgress?: ProgressHand
     id: postId,
     user_id: session.user.id,
     mode,
+    topic_entity: topic,
     avatar_id: avatarId,
     media_url: uploaded.mediaUrl,
     motion_url: uploaded.motionUrl,

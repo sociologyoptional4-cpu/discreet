@@ -1,12 +1,13 @@
 import {
   demoFeed, demoIsFollowing, demoLiked, demoProfileByName, demoProfilePosts, demoSearch, demoThumbnails, demoTrending, demoViewerProfile,
 } from '@/lib/demoData';
+import { nextFeedPage } from '@/lib/feedClient';
 import { currentUserId, ensureSession } from '@/lib/session';
 import { isDemoMode, supabase } from '@/lib/supabase';
 import type { FeedItem, Profile, PublicPost, SearchResult, Sentiment, TrendingTopic } from '@/types/social';
 
 const FEED_PAGE = 30;
-const SEARCH_LIMIT = 200;
+
 
 /** Adds "did I like this / do I follow its creator" for the signed-in visitor. Without a session both are false. */
 export async function withViewerState(posts: PublicPost[]): Promise<FeedItem[]> {
@@ -27,11 +28,12 @@ export async function withViewerState(posts: PublicPost[]): Promise<FeedItem[]> 
 }
 
 /** Newest live posts. `focusPostId` (opened from search) is fetched separately and put first. */
-export async function fetchFeed(focusPostId?: string | null, topic?: string | null): Promise<FeedItem[]> {
+export async function fetchFeed(focusPostId?: string | null, topic?: string | null, snapshot = new Date().toISOString()): Promise<FeedItem[]> {
   if (isDemoMode) return withViewerState(demoFeed(topic, focusPostId));
   let query = supabase.from('public_posts').select('*');
   if (topic) query = query.eq('topic_entity', topic.trim().toLowerCase());
-  const latest = await query.order(topic ? 'likes_count' : 'created_at', { ascending: false }).limit(FEED_PAGE);
+  const latest = topic ? await query.order('likes_count', { ascending: false }).limit(FEED_PAGE)
+    : { data: (await nextFeedPage(snapshot, [], [], null)).posts, error: null };
   if (latest.error) throw new Error('Could not load the feed.');
   let posts = latest.data as PublicPost[];
 
@@ -44,36 +46,32 @@ export async function fetchFeed(focusPostId?: string | null, topic?: string | nu
   return withViewerState(posts);
 }
 
-/** `%` and `_` are wildcards in ILIKE; the visitor's text must match literally. */
-function escapeLike(text: string): string {
-  return text.replace(/[\\%_]/g, (c) => `\\${c}`);
-}
-
-/**
- * Live posts matching `query` by topic or transcript, tolerant of typos ("dary milk" finds "dairy milk"), most liked first.
- * Uses the `search_posts_fuzzy` RPC; if that function is not installed yet, falls back to a plain topic match.
- */
-export async function searchPostsFuzzy(query: string): Promise<SearchResult[]> {
+/** The search API fuses public lexical, fuzzy and semantic results. */
+export async function searchPostsFuzzy(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
   const term = query.trim();
   if (!term) return [];
   if (isDemoMode) return demoSearch(term);
-  const rpc = await supabase.rpc('search_posts_fuzzy', { search_query: term });
-  if (!rpc.error) return (rpc.data as SearchResult[]).map((r) => ({ ...r, key_points: r.key_points ?? [] }));
+  const session = await ensureSession();
+  const response = await fetch('/api/search?q=' + encodeURIComponent(term), {
+    signal, headers: { Authorization: 'Bearer ' + session.access_token },
+  });
+  if (!response.ok) throw new Error('Search failed. Try again.');
+  const result: { posts: SearchResult[] } = await response.json();
+  return result.posts.map(post => ({ ...post, key_points: post.key_points ?? [], match_score: post.match_score ?? 0 }));
+}
 
-  const { data, error } = await supabase
-    .from('public_posts')
-    .select('*')
-    .ilike('topic_entity', `%${escapeLike(term)}%`)
-    .order('likes_count', { ascending: false })
-    .limit(SEARCH_LIMIT);
-  if (error) throw new Error('Search failed. Try again.');
-  return (data as PublicPost[]).map((p) => ({ ...p, category: 'general', key_points: [], match_score: 0 }));
+export async function suggestTopics(query: string, signal: AbortSignal): Promise<string[]> {
+  if (isDemoMode) return demoTrending(12).map(row => row.topic_entity).filter(topic => topic.startsWith(query.toLowerCase()));
+  const response = await fetch('/api/search/suggest?q=' + encodeURIComponent(query), { signal });
+  if (!response.ok) return [];
+  const result: { suggestions: string[] } = await response.json();
+  return result.suggestions;
 }
 
 /** The most reviewed live topics, for the empty search screen. */
 export async function getTrendingTopics(limit = 10): Promise<TrendingTopic[]> {
   if (isDemoMode) return demoTrending(limit);
-  const { data, error } = await supabase.rpc('get_trending_topics', { limit_count: limit });
+  const { data, error } = await supabase.rpc('get_trending_velocity', { p_limit: limit });
   if (error) throw new Error('Could not load trending topics.');
   return (data as TrendingTopic[]).map((t) => ({
     topic_entity: t.topic_entity,

@@ -3,6 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, MessageCircle, Plus, Search, User, type LucideIcon } from 'lucide-react';
+import { useOfflineDelivery } from '@/hooks/useOfflineDelivery';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useImmersive } from '@/lib/immersive';
 
@@ -20,6 +21,7 @@ const HIDDEN_PREFIX = ['/record', '/persona', '/chats/'];
 
 /** A floating glass pill. It slides away while a feed card is expanded or the camera is open. */
 export function BottomNav() {
+  useOfflineDelivery();
   const pathname = usePathname();
   const { unreadCount } = useNotifications();
   const immersive = useImmersive();

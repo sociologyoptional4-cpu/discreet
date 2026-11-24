@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MaskPlayback } from '@/components/MaskPlayback';
 import { PrivacyCamera } from '@/components/PrivacyCamera';
-import { useStories } from '@/hooks/useStories';
+import { useStories, useStoryReceipts } from '@/hooks/useStories';
 import { AVATAR_META, isAvatarId } from '@/lib/avatars';
 import { currentUserId } from '@/lib/session';
 import type { Story, StoryGroup } from '@/lib/storyGroups';
@@ -75,6 +75,24 @@ function StoryViewer({ groups, startGroup, onClose }: { groups: StoryGroup[]; st
   const group = groups[Math.min(pos.group, groups.length - 1)];
   const story: Story | undefined = group.stories[Math.min(pos.story, group.stories.length - 1)];
 
+  const viewers = useStoryReceipts(story?.id, story?.user_id, viewerId);
+  const [paused, setPaused] = useState(false);
+  const touch = useRef<{y:number;at:number} | null>(null);
+  const suppressClick = useRef(false);
+  const begin = (y: number) => {
+    touch.current = {y,at:performance.now()};
+    suppressClick.current = false;
+    setPaused(true);
+  };
+  const end = (y: number) => {
+    if (!touch.current) return;
+    const distance = y - touch.current.y;
+    suppressClick.current = performance.now() - touch.current.at > 250 || Math.abs(distance) > 35;
+    touch.current = null;
+    setPaused(false);
+    if (distance > 70) onClose();
+  };
+
   useEffect(() => {
     let alive = true;
     void currentUserId().then((id) => { if (alive) setViewerId(id); });
@@ -131,11 +149,11 @@ function StoryViewer({ groups, startGroup, onClose }: { groups: StoryGroup[]; st
   return (
     <div role="dialog" aria-modal="true" aria-label={`${group.username}'s story`} className="fixed inset-0 z-50 flex items-center justify-center bg-black text-white">
       <div className="relative h-full w-[min(100vw,calc(100dvh*9/16))] overflow-hidden">
-        <StoryPlayer key={story.id} story={story} index={pos.story} count={group.stories.length} onDone={next} />
+        <StoryPlayer paused={paused} key={story.id} story={story} index={pos.story} count={group.stories.length} onDone={next} />
 
         {/* Tap zones: the left third goes back, the rest goes forward. */}
-        <button type="button" onClick={previous} aria-label="Previous story" className="absolute inset-y-16 left-0 z-10 w-1/3" />
-        <button type="button" onClick={next} aria-label="Next story" className="absolute inset-y-16 right-0 z-10 w-2/3" />
+        <button type="button" onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); begin(e.clientY); }} onPointerUp={e => end(e.clientY)} onPointerCancel={() => { touch.current = null; setPaused(false); }} onClick={() => { if (!suppressClick.current) previous(); suppressClick.current = false; }} aria-label="Previous story" className="absolute inset-y-16 left-0 z-10 w-1/3" />
+        <button type="button" onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); begin(e.clientY); }} onPointerUp={e => end(e.clientY)} onPointerCancel={() => { touch.current = null; setPaused(false); }} onClick={() => { if (!suppressClick.current) next(); suppressClick.current = false; }} aria-label="Next story" className="absolute inset-y-16 right-0 z-10 w-2/3" />
 
         <div className="absolute inset-x-0 top-5 z-20 flex items-center justify-between px-3 pt-[env(safe-area-inset-top)]">
           <span className="rounded bg-black/50 px-2 py-1 text-sm font-semibold">@{group.username}</span>
@@ -143,7 +161,7 @@ function StoryViewer({ groups, startGroup, onClose }: { groups: StoryGroup[]; st
         </div>
 
         <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-2 px-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {note && <p role="status" className="rounded bg-black/70 px-3 py-1 text-sm">{note}</p>}
+          {(note || isOwn) && <p role="status" className="rounded bg-black/70 px-3 py-1 text-sm">{note ?? `${viewers.length} views${viewers.length ? ' · ' + viewers.map(v => '@' + (v.viewer?.username ?? 'unknown')).join(', ') : ''}`}</p>}
           {!isOwn && (
             <div className="flex gap-3" role="group" aria-label="React to this story">
               {STORY_REACTIONS.map((emoji) => (
@@ -160,17 +178,22 @@ function StoryViewer({ groups, startGroup, onClose }: { groups: StoryGroup[]; st
 }
 
 /** One story: its media, a segment per clip in the group, and a timer that calls `onDone` when its time is up. */
-function StoryPlayer({ story, index, count, onDone }: { story: Story; index: number; count: number; onDone: () => void }) {
+function StoryPlayer({ story, index, count, onDone, paused }: { paused: boolean; story: Story; index: number; count: number; onDone: () => void }) {
   const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef(0);
   const doneRef = useRef(onDone);
   useEffect(() => {
     doneRef.current = onDone;
   });
 
   useEffect(() => {
-    const started = performance.now();
+    if (paused) return;
+    let last = performance.now();
     const id = setInterval(() => {
-      const ms = performance.now() - started;
+      const now = performance.now();
+      if (document.visibilityState === 'visible') elapsedRef.current += now - last;
+      last = now;
+      const ms = elapsedRef.current;
       if (ms >= STORY_SECONDS * 1000) {
         clearInterval(id);
         doneRef.current();
@@ -179,14 +202,14 @@ function StoryPlayer({ story, index, count, onDone }: { story: Story; index: num
       }
     }, TICK_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [paused]);
 
   return (
     <>
       {story.mode === 'mask' ? (
-        <MaskPlayback avatarId={isAvatarId(story.avatar_id) ? story.avatar_id : null} motionUrl={story.motion_url} audioUrl={story.media_url} soundOn />
+        <MaskPlayback avatarId={isAvatarId(story.avatar_id) ? story.avatar_id : null} motionUrl={story.motion_url} audioUrl={story.media_url} paused={paused} soundOn />
       ) : (
-        <StoryVideo src={story.media_url} />
+        <StoryVideo src={story.media_url} paused={paused} />
       )}
       <ol aria-label={`Clip ${index + 1} of ${count}`} className="absolute inset-x-2 top-2 z-20 flex gap-1 pt-[env(safe-area-inset-top)]">
         {Array.from({ length: count }, (_, i) => (
@@ -199,15 +222,16 @@ function StoryPlayer({ story, index, count, onDone }: { story: Story; index: num
   );
 }
 
-function StoryVideo({ src }: { src: string }) {
+function StoryVideo({ src, paused }: { src: string; paused: boolean }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
+    if (paused) { video.pause(); return; }
     video.play().catch(() => {
       video.muted = true; // sound is refused without a recent tap; a muted story is better than a frozen one
       void video.play().catch(() => {});
     });
-  }, [src]);
+  }, [src, paused]);
   return <video ref={ref} src={src} playsInline autoPlay loop className="size-full object-cover" />;
 }

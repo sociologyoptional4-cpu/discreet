@@ -44,7 +44,8 @@ const cache = new Map<string, Promise<MotionTrackFile | null>>();
 /** Downloads and validates a motion track once per URL; a failed download is not cached so it can be retried. */
 export function loadMotionTrack(url: string): Promise<MotionTrackFile | null> {
   if (isDemoUrl(url)) return Promise.resolve(demoMotion(url));
-  let pending = cache.get(url);
+  const ephemeral = url.startsWith('blob:') || /[?&]X-Amz-Signature=/i.test(url);
+  let pending = ephemeral ? undefined : cache.get(url);
   if (!pending) {
     pending = fetch(url)
       .then((r) => (r.ok ? r.json() : null))
@@ -54,7 +55,12 @@ export function loadMotionTrack(url: string): Promise<MotionTrackFile | null> {
         if (!track) cache.delete(url);
         return track;
       });
-    cache.set(url, pending);
+    if (cache.size >= 6) cache.delete(cache.keys().next().value as string);
+    if (!ephemeral) {
+      const oldest = cache.keys().next();
+      if (cache.size >= 32 && !oldest.done) cache.delete(oldest.value);
+      cache.set(url, pending);
+    }
   }
   return pending;
 }

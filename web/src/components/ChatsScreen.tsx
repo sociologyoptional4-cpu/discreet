@@ -54,8 +54,8 @@ export function ChatsScreen() {
         <ul className="mt-2 divide-y divide-white/10">
           {accepted.map((c) => (
             <li key={c.id}>
-              <Link href={`/chats/${c.id}`} className="flex items-center justify-between py-3">
-                <span className="font-semibold">@{c.other.username}</span>
+              <Link href={`/chats/${c.id}`} aria-label={`Chat with ${c.other.username}, ${c.unread} unread, streak ${c.streak}`} className="flex items-center justify-between py-3">
+                <span className="font-semibold">@{c.other.username}{c.unread > 0 ? ` (${c.unread})` : ''}{c.streak > 0 ? ` 🔥 ${c.streak}` : ''}</span>
                 <time dateTime={c.lastMessageAt} className="text-xs text-white/50">{new Date(c.lastMessageAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time>
               </Link>
             </li>

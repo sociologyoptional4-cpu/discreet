@@ -2,61 +2,73 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { MaskPlayback } from '@/components/MaskPlayback';
 import { isAvatarId } from '@/lib/avatars';
+import type { SnapView } from '@/types/chat';
 import type { ChatMessage } from '@/lib/chatMessages';
 
 type Props = {
   message: ChatMessage;
   isOwnMessage: boolean;
-  /** Called once when the viewer lets go (or the page is hidden) so the snap cannot be opened again. */
-  onViewed: (messageId: string) => void;
+  onOpen: (id: string) => Promise<SnapView | null>;
+  canReplay: boolean;
+  onSignal: (reason: 'key' | 'hidden') => void;
 };
 
-/**
- * A disappearing snap. The receiver holds the pill to see it; letting go, losing focus, leaving the page or
- * unmounting closes it at once and marks it viewed. The sender only sees whether it was opened.
- */
-export function HoldToViewSnap({ message, isOwnMessage, onViewed }: Props) {
-  const [open, setOpen] = useState(false);
-  const [consumed, setConsumed] = useState(false); // what the screen shows; the ref below is what handlers check
-  const closedRef = useRef(true); // true while nothing is showing, so closing twice only reports once
-  const consumedRef = useRef(false); // set the moment a view ends, before the parent's state catches up
-  const onViewedRef = useRef(onViewed);
-  const idRef = useRef(message.id);
-  useEffect(() => {
-    onViewedRef.current = onViewed;
-    idRef.current = message.id;
-  });
-
-  const unviewed = message.viewed_at === null && !consumed;
-  const canOpen = !isOwnMessage && message.status === 'sent' && unviewed && message.media_url !== null;
-
-  const start = useCallback(() => {
-    if (!canOpen || !closedRef.current || consumedRef.current) return;
-    closedRef.current = false;
-    setOpen(true);
-  }, [canOpen]);
-
+export function HoldToViewSnap({ message, isOwnMessage, onOpen, canReplay, onSignal }: Props) {
+  const [media, setMedia] = useState<{url: string; motionUrl: string | null} | null>(null);
+  const gesture = useRef(0);
+  const held = useRef(false);
+  const captureReported = useRef(false);
+  const pending = useRef(false);
+  const signal = useRef(onSignal);
+  useEffect(() => { signal.current = onSignal; }, [onSignal]);
+  const localPreview = isOwnMessage && message.media_url?.startsWith('blob:');
+  const canOpen = Boolean(localPreview || (!isOwnMessage && !message.replayed_by_recipient && (!message.viewed_at || canReplay)));
+  const open = media !== null;
   const finish = useCallback(() => {
-    if (closedRef.current) return;
-    closedRef.current = true;
-    consumedRef.current = true;
-    setConsumed(true);
-    setOpen(false);
-    onViewedRef.current(idRef.current);
+    held.current = false;
+    gesture.current++;
+    setMedia(null);
   }, []);
-
-  // Anything that takes the viewer away from the screen ends the view: switching tabs, locking the phone, leaving the page.
+  const start = async () => {
+    if (!canOpen || held.current || pending.current) return;
+    held.current = true;
+    captureReported.current = false;
+    const id = ++gesture.current;
+    if (localPreview && message.media_url) {
+      setMedia({url: message.media_url, motionUrl: message.motion_url});
+      return;
+    }
+    pending.current = true;
+    try {
+      const result = await onOpen(message.id);
+      if (result && gesture.current === id && held.current && document.visibilityState === 'visible') setMedia(result);
+    } finally { pending.current = false; }
+  };
+  useEffect(() => () => { held.current = false; gesture.current++; }, []);
   useEffect(() => {
     if (!open) return;
-    const onHide = () => { if (document.visibilityState === 'hidden') finish(); };
-    document.addEventListener('visibilitychange', onHide);
+    const hidden = () => {
+      if (document.visibilityState !== 'hidden') return;
+      if (!isOwnMessage) signal.current('hidden');
+      finish();
+    };
+    const key = (e: globalThis.KeyboardEvent) => {
+      if (!isOwnMessage && e.key === 'PrintScreen' && !captureReported.current) {
+        captureReported.current = true;
+        signal.current('key');
+      }
+    };
+    const expiry = window.setTimeout(finish, 60000);
+    window.addEventListener('keyup', key);
+    document.addEventListener('visibilitychange', hidden);
     window.addEventListener('pagehide', finish);
     return () => {
-      document.removeEventListener('visibilitychange', onHide);
+      window.clearTimeout(expiry);
+      window.removeEventListener('keyup', key);
+      document.removeEventListener('visibilitychange', hidden);
       window.removeEventListener('pagehide', finish);
-      finish(); // unmounted while open
     };
-  }, [open, finish]);
+  }, [open, isOwnMessage, finish]);
 
   const onKeyDown = (event: KeyboardEvent) => {
     if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
@@ -70,7 +82,7 @@ export function HoldToViewSnap({ message, isOwnMessage, onViewed }: Props) {
 
   const label = isOwnMessage
     ? message.status === 'sending' ? 'Sending snap…' : message.status === 'failed' ? 'Snap failed to send' : message.viewed_at ? 'Snap opened' : 'Snap sent, not opened yet'
-    : message.viewed_at || consumed ? 'Opened' : message.status !== 'sent' ? 'Snap not ready' : 'Hold to view snap';
+    : canReplay ? 'Hold to replay' : message.viewed_at ? 'Opened' : 'Hold to view snap';
 
   return (
     // Pointer handlers sit on the wrapper and the overlay is inside it, so moving over the overlay is not "leaving".
@@ -98,9 +110,9 @@ export function HoldToViewSnap({ message, isOwnMessage, onViewed }: Props) {
         <div role="dialog" aria-modal="true" aria-label="Snap" className="fixed inset-0 z-50 flex items-center justify-center bg-black">
           <div className="relative h-full w-[min(100vw,calc(100dvh*9/16))]">
             {message.snap_mode === 'mask' ? (
-              <MaskPlayback avatarId={isAvatarId(message.avatar_id) ? message.avatar_id : null} motionUrl={message.motion_url} audioUrl={message.media_url ?? ''} soundOn />
+              <MaskPlayback avatarId={isAvatarId(message.avatar_id) ? message.avatar_id : null} motionUrl={media.motionUrl} audioUrl={media.url} soundOn />
             ) : (
-              <SnapVideo src={message.media_url ?? ''} />
+              <SnapVideo src={media.url} />
             )}
           </div>
           <p className="pointer-events-none absolute inset-x-0 bottom-6 text-center text-sm text-white/80">Release to close</p>

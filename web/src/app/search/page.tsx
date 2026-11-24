@@ -2,7 +2,7 @@
 import { LayoutGroup, motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Ghost, Heart, Search, X } from 'lucide-react';
 import { SentimentVerdictBar, verdictPercentages, type SentimentFilter } from '@/components/SentimentVerdictBar';
 import { AIVisorOrb } from '@/components/AIVisorOrb';
@@ -11,7 +11,7 @@ import { LiquidGlassSheet } from '@/components/LiquidGlassSheet';
 import { PrismaticLiquidBlob } from '@/components/PrismaticLiquidBlob';
 import { StateMessage } from '@/components/StateMessage';
 import { TopicThumb } from '@/components/TopicThumb';
-import { countBySentiment, fetchTopicThumbnails, getTrendingTopics, searchPostsFuzzy } from '@/lib/feedData';
+import { countBySentiment, fetchTopicThumbnails, getTrendingTopics, searchPostsFuzzy, suggestTopics } from '@/lib/feedData';
 import type { PrivacyMode } from '@/types/privacy';
 import type { PublicPost, SearchResult, TrendingTopic } from '@/types/social';
 
@@ -49,6 +49,24 @@ function SearchContent() {
   // The box shows what the visitor types; the URL follows 300 ms later. A URL change that did not come from typing
   // (Back button, a topic tap) is copied into the box, but our own delayed updates never overwrite fresh keystrokes.
   const [text, setText] = useState(q);
+  const input = useRef<HTMLInputElement>(null);
+  const [completion, setCompletion] = useState<{ prefix: string; topic: string } | null>(null);
+  const [allowCompletion, setAllowCompletion] = useState(false);
+  const suggested = allowCompletion && completion?.prefix === text ? completion.topic : null;
+  useEffect(() => {
+    if (!allowCompletion || !text.trim() || text.length > 160) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void suggestTopics(text, controller.signal).then(topics => {
+        const topic = topics.find(value => value.length > text.length && value.toLowerCase().startsWith(text.toLowerCase()));
+        if (topic && !controller.signal.aborted) setCompletion({ prefix: text, topic });
+      }).catch(() => {});
+    }, 35);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [allowCompletion, text]);
+  useLayoutEffect(() => {
+    if (suggested && input.current === document.activeElement) input.current?.setSelectionRange(text.length, suggested.length);
+  }, [text, suggested]);
   const [syncedQ, setSyncedQ] = useState(q);
   const [lastPushed, setLastPushed] = useState(q);
   if (q !== syncedQ) {
@@ -67,6 +85,7 @@ function SearchContent() {
   }, [text, q, router]);
 
   const chooseTopic = (topic: string) => {
+    setAllowCompletion(false);
     setText(topic);
     setLastPushed(topic);
     router.replace(searchUrl(topic), { scroll: false });
@@ -92,10 +111,11 @@ function SearchContent() {
   useEffect(() => {
     if (!q) return;
     let alive = true;
-    searchPostsFuzzy(q)
+    const controller = new AbortController();
+    searchPostsFuzzy(q, controller.signal)
       .then((data) => { if (alive) setResults({ key: q, data }); })
       .catch((e: unknown) => { if (alive) setResults({ key: q, error: messageOf(e, 'Search failed.') }); });
-    return () => { alive = false; };
+    return () => { alive = false; controller.abort(); };
   }, [q]);
 
   const current = results?.key === q ? results : null;
@@ -118,12 +138,26 @@ function SearchContent() {
             <ArrowLeft aria-hidden className="size-5" />
           </button>
         )}
-        <form role="search" onSubmit={(e) => { e.preventDefault(); chooseTopic(text.trim()); }} className="relative flex-1">
+        <form role="search" onSubmit={(e) => { e.preventDefault(); chooseTopic(suggested ?? text.trim()); }} className="relative flex-1">
           <Search aria-hidden className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-400" />
           <input
             type="search"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
+            ref={input}
+            maxLength={160}
+            aria-autocomplete="inline"
+            value={suggested ?? text}
+            onChange={(e) => {
+              const event = e.nativeEvent as InputEvent;
+              setAllowCompletion(!event.isComposing && event.inputType === 'insertText');
+              setText(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (suggested && (e.key === 'Tab' || e.key === 'ArrowRight')) {
+                if (e.key === 'ArrowRight') e.preventDefault();
+                chooseTopic(suggested);
+              }
+              if (e.key === 'Escape') setAllowCompletion(false);
+            }}
             placeholder="Search a product"
             aria-label="Search products and topics"
             autoComplete="off"

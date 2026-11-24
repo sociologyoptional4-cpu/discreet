@@ -41,24 +41,33 @@ export function useConversations(): Conversations {
   useEffect(() => {
     aliveRef.current = true;
     if (!isSupabaseConfigured) return;
+    let cancelled = false;
     let channel: ReturnType<typeof supabase.channel> | null = null;
     void currentUserId().then(async (viewer) => {
-      if (!aliveRef.current) return;
+      if (cancelled) return;
       viewerRef.current = viewer;
       if (viewer) {
         await reload();
-        if (!aliveRef.current) return;
+        if (cancelled) return;
         channel = supabase
           .channel(`inbox:${viewer}:${crypto.randomUUID().slice(0, 8)}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
+            if (cancelled) return;
             if (timerRef.current) clearTimeout(timerRef.current);
             timerRef.current = setTimeout(() => void reload(), REFRESH_DELAY_MS);
           })
-          .subscribe();
+          .subscribe((status) => {
+            if (!cancelled && status === 'SUBSCRIBED') void reload();
+          });
       }
+      setIsLoading(false);
+    }).catch((e: unknown) => {
+      if (cancelled) return;
+      setError(e instanceof Error ? e.message : 'Could not open your inbox.');
       setIsLoading(false);
     });
     return () => {
+      cancelled = true;
       aliveRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
       if (channel) void supabase.removeChannel(channel);

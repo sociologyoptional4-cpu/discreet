@@ -77,6 +77,7 @@ const GAME4_NODE: Record<AvatarId, string> = {
 
 function Game4Avatar({ avatarId, currentFrameRef }: Props) {
   const { scene } = useGLTF('/models/game4/character_pack.glb');
+  const modelRef = useRef<THREE.Object3D>(null);
   const source = scene.getObjectByName(GAME4_NODE[avatarId]);
   const model = useMemo(() => {
     if (!source) return null;
@@ -91,12 +92,13 @@ function Game4Avatar({ avatarId, currentFrameRef }: Props) {
   }, [source]);
   useFrame((_, delta) => {
     const frame = currentFrameRef.current;
-    if (!model || !frame) return;
-    model.rotation.x = THREE.MathUtils.damp(model.rotation.x, frame.head[0] * 0.45, 8, delta);
-    model.rotation.y = THREE.MathUtils.damp(model.rotation.y, frame.head[1] * 0.7, 8, delta);
-    model.rotation.z = THREE.MathUtils.damp(model.rotation.z, frame.head[2] * 0.45, 8, delta);
+    const renderedModel = modelRef.current;
+    if (!renderedModel || !frame) return;
+    renderedModel.rotation.x = THREE.MathUtils.damp(renderedModel.rotation.x, frame.head[0] * 0.45, 8, delta);
+    renderedModel.rotation.y = THREE.MathUtils.damp(renderedModel.rotation.y, frame.head[1] * 0.7, 8, delta);
+    renderedModel.rotation.z = THREE.MathUtils.damp(renderedModel.rotation.z, frame.head[2] * 0.45, 8, delta);
   });
-  return model ? <primitive object={model} /> : null;
+  return model ? <primitive ref={modelRef} object={model} /> : null;
 }
 
 /* ------------------------------------------------------ procedural avatar */

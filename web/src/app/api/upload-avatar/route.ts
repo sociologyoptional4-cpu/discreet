@@ -1,6 +1,6 @@
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { getSupabaseAdmin } from '@/lib/supabase';
+import { getSupabaseAdmin } from '@/lib/server/admin';
 import { MAX_AVATAR_BYTES } from '@/types/persona';
 
 const URL_TTL_SECONDS = 5 * 60;

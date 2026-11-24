@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { demoToggleFollow, demoToggleLike } from '@/lib/demoData';
+import { trackPost } from '@/lib/telemetry';
 import { currentUserId, ensureSession } from '@/lib/session';
 import { isDemoMode, supabase } from '@/lib/supabase';
 
@@ -16,7 +17,7 @@ export type SocialActions = {
   likeView: (post: { id: string; liked: boolean; likes_count: number }) => { liked: boolean; count: number };
   followView: (creatorId: string, base: { following: boolean; followers: number }) => { following: boolean; followers: number };
   toggleLike: (postId: string, currentlyLiked: boolean) => Promise<void>;
-  toggleFollow: (creatorId: string, currentlyFollowing: boolean) => Promise<void>;
+  toggleFollow: (creatorId: string, currentlyFollowing: boolean, postId?: string) => Promise<void>;
   error: string | null;
   clearError: () => void;
 };
@@ -68,6 +69,7 @@ export function useSocialActions(): SocialActions {
         ? await supabase.from('post_likes').delete().eq('user_id', session.user.id).eq('post_id', postId)
         : await supabase.from('post_likes').insert({ user_id: session.user.id, post_id: postId });
       if (result.error && result.error.code !== UNIQUE_VIOLATION) throw result.error;
+      if (!result.error) trackPost(postId, currentlyLiked ? 'unlike' : 'like');
     } catch {
       apply(-1, currentlyLiked);
       setError(currentlyLiked ? 'Could not remove your like.' : 'Could not like this post.');
@@ -76,7 +78,7 @@ export function useSocialActions(): SocialActions {
     }
   }, []);
 
-  const toggleFollow = useCallback(async (creatorId: string, currentlyFollowing: boolean) => {
+  const toggleFollow = useCallback(async (creatorId: string, currentlyFollowing: boolean, postId?: string) => {
     const key = `follow:${creatorId}`;
     if (inFlight.current.has(key)) return;
     inFlight.current.add(key);
@@ -96,6 +98,7 @@ export function useSocialActions(): SocialActions {
         ? await supabase.from('follows').delete().eq('follower_id', session.user.id).eq('following_id', creatorId)
         : await supabase.from('follows').insert({ follower_id: session.user.id, following_id: creatorId });
       if (result.error && result.error.code !== UNIQUE_VIOLATION) throw result.error;
+      if (!result.error && postId && !currentlyFollowing) trackPost(postId, 'follow_from_post');
     } catch {
       apply(-1, currentlyFollowing);
       setError(currentlyFollowing ? 'Could not unfollow.' : 'Could not follow.');

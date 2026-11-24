@@ -10,7 +10,7 @@ export type MediaInput =
 export type UploadedMedia = { mediaUrl: string; motionUrl: string | null };
 
 type Upload = { blob: Blob; contentType: string; fileName: string };
-type Presigned = { uploadUrl: string; publicUrl: string };
+type Presigned = { uploadUrl: string; key: string; publicUrl?: string };
 
 /** Tells the two payload shapes apart: only a 3D mask recording carries motion frames. */
 export function toMediaInput(payload: RecordedSnapPayload | MaskRecordingPayload): MediaInput {
@@ -39,14 +39,14 @@ function planFiles(input: MediaInput): { media: Upload; motion: Upload | null } 
   return { media: { blob: payload.blob, contentType: videoType, fileName: videoType.includes('mp4') ? 'snap.mp4' : 'snap.webm' }, motion: null };
 }
 
-async function presign(token: string, file: Upload, expiryTier: ExpiryTier): Promise<Presigned> {
+async function presign(token: string, file: Upload, expiryTier: ExpiryTier, purpose: 'post' | 'snap'): Promise<Presigned> {
   const response = await fetch('/api/upload-url', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ fileName: file.fileName, contentType: file.contentType, expiryTier }),
+    body: JSON.stringify({ fileName: file.fileName, contentType: file.contentType, fileSize: file.blob.size, expiryTier, purpose }),
   });
   const body = (await response.json().catch(() => null)) as (Presigned & { error?: string }) | null;
-  if (!response.ok || !body?.uploadUrl) throw new Error(body?.error ?? 'Could not prepare the upload.');
+  if (!response.ok || !body?.uploadUrl || !body.key || (purpose === 'post' && !body.publicUrl)) throw new Error(body?.error ?? 'Could not prepare the upload.');
   return body;
 }
 
@@ -69,7 +69,7 @@ function putFile(url: string, file: Upload, onBytes: (loaded: number) => void): 
  * `expiryTier` picks the key prefix that the bucket's lifecycle rule deletes on schedule.
  * `onProgress` receives 0..1 across all files.
  */
-export async function uploadMedia(token: string, input: MediaInput, expiryTier: ExpiryTier, onProgress?: (fraction: number) => void): Promise<UploadedMedia> {
+async function upload(token: string, input: MediaInput, purpose: 'post' | 'snap', expiryTier: ExpiryTier, onProgress?: (fraction: number) => void): Promise<Presigned[]> {
   const { media, motion } = planFiles(input);
   const files = motion ? [media, motion] : [media];
   const totalBytes = files.reduce((sum, f) => sum + f.blob.size, 0) || 1;
@@ -77,7 +77,7 @@ export async function uploadMedia(token: string, input: MediaInput, expiryTier: 
   const report = () => onProgress?.(Math.min(1, [...sent.values()].reduce((a, b) => a + b, 0) / totalBytes));
   report();
 
-  const targets = await Promise.all(files.map((f) => presign(token, f, expiryTier)));
+  const targets = await Promise.all(files.map((f) => presign(token, f, expiryTier, purpose)));
   await Promise.all(
     files.map((file, i) =>
       putFile(targets[i].uploadUrl, file, (loaded) => {
@@ -86,5 +86,16 @@ export async function uploadMedia(token: string, input: MediaInput, expiryTier: 
       }),
     ),
   );
-  return { mediaUrl: targets[0].publicUrl, motionUrl: motion ? targets[1].publicUrl : null };
+  return targets;
+}
+
+export async function uploadMedia(token: string, input: MediaInput, expiryTier: ExpiryTier, onProgress?: (fraction: number) => void): Promise<UploadedMedia> {
+  const [media, motion] = await upload(token, input, 'post', expiryTier, onProgress);
+  if (!media.publicUrl) throw new Error('Missing public media URL.');
+  return { mediaUrl: media.publicUrl, motionUrl: motion?.publicUrl ?? null };
+}
+
+export async function uploadPrivateSnap(token: string, input: MediaInput, onProgress?: (fraction: number) => void) {
+  const [media, motion] = await upload(token, input, 'snap', '1d', onProgress);
+  return { r2Key: media.key, motionR2Key: motion?.key ?? null };
 }

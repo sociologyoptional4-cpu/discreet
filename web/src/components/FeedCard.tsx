@@ -2,9 +2,9 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { ArrowLeft, Heart, MessageCircle, Pause, Play, Share2, Volume2, VolumeX } from 'lucide-react';
-import { MaskPlayback } from '@/components/MaskPlayback';
 import { SwipeBubbleOverlay } from '@/components/SwipeBubbleOverlay';
 import type { SocialActions } from '@/hooks/useSocialActions';
+import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
 import { AVATAR_META, STUDIO_BACKDROP } from '@/lib/avatars';
 import type { FeedItem, Sentiment } from '@/types/social';
 
@@ -29,6 +29,8 @@ export type FeedCardProps = {
   onTogglePause: () => void;
   onToggleSound: () => void;
   onShare: () => void;
+  onCounterTake: () => void;
+  onNotInterested: () => void;
   onMessage: () => void;
 };
 
@@ -41,8 +43,19 @@ const stop = (event: MouseEvent): void => event.stopPropagation();
  */
 export function FeedCard(props: FeedCardProps) {
   const { item, active, near, expanded, paused, soundOn, social, onExpand, onCollapse, onTogglePause, onToggleSound, onShare, onMessage } = props;
+  const longPress = useNegativeFeedback(props.onNotInterested);
+  const counterTake = item.topic_entity ? {
+    role: 'link', tabIndex: 0, 'aria-label': 'Add your take on ' + item.topic_entity,
+    onClick: (event: MouseEvent) => { stop(event); props.onCounterTake(); },
+    onKeyDown: (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); props.onCounterTake(); }
+    },
+  } : {};
   const reduceMotion = useReducedMotion();
   const barRef = useRef<HTMLDivElement>(null);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const missingMedia = !item.media_url || failedUrl === item.media_url;
+  const fallback = item.transcript || item.ai_summary || 'Media unavailable';
   const [likeBurst, setLikeBurst] = useState(0);
   const like = social.likeView(item);
   const creatorId = item.user_id;
@@ -62,6 +75,7 @@ export function FeedCard(props: FeedCardProps) {
     if (!like.liked) { setLikeBurst(Date.now()); void social.toggleLike(item.id, false); }
   };
   const open = (event: KeyboardEvent) => {
+    if (event.shiftKey && event.key === 'F10') { event.preventDefault(); props.onNotInterested(); return; }
     if (!expanded && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
       onExpand();
@@ -85,6 +99,7 @@ export function FeedCard(props: FeedCardProps) {
       transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 32 }}
       style={{ borderRadius: expanded ? 0 : 28 }}
       className={`${expanded ? 'fixed inset-0 z-50' : 'absolute inset-0'} overflow-hidden bg-black text-white`}
+      {...longPress}
       onClick={expanded ? onTogglePause : onExpand}
       onDoubleClick={doubleTapLike}
       onKeyDown={open}
@@ -93,15 +108,13 @@ export function FeedCard(props: FeedCardProps) {
       aria-label={expanded ? undefined : `Open post ${item.topic_entity ? `about ${item.topic_entity}` : ''} by ${name}`}
     >
       <SwipeBubbleOverlay trigger={likeBurst} kind="like" />
-      <div className="absolute inset-0">
+      <div data-mask-slot className="absolute inset-0">
         {item.mode === 'mask' ? (
-          active ? (
-            <MaskPlayback key={item.id} avatarId={item.avatar_id} motionUrl={item.motion_url} audioUrl={item.media_url} soundOn={soundOn} paused={paused} barRef={barRef} />
-          ) : (
+          active ? null : (
             <div className="size-full" style={{ background: STUDIO_BACKDROP[item.avatar_id ?? 'cyber_monk'] }} />
           )
-        ) : near ? (
-          <PostVideo src={item.media_url} active={active} paused={paused} soundOn={soundOn} barRef={barRef} />
+        ) : near && !missingMedia ? (
+          <PostVideo src={item.media_url} onFailure={() => setFailedUrl(item.media_url)} active={active} paused={paused} soundOn={soundOn} barRef={barRef} />
         ) : null}
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/70 to-transparent" />
@@ -113,14 +126,14 @@ export function FeedCard(props: FeedCardProps) {
 
       {/* hairline progress */}
       <div aria-hidden className="absolute inset-x-0 bottom-0 h-[2px] bg-white/20">
-        <div ref={barRef} className="h-full origin-left bg-white" style={{ transform: 'scaleX(0)' }} />
+        <div data-feed-progress ref={barRef} className="h-full origin-left bg-white" style={{ transform: 'scaleX(0)' }} />
       </div>
 
       {!expanded ? (
         <>
           <div className="absolute bottom-6 left-5 right-24 flex flex-col gap-0.5">
-            <span className="truncate text-[17px] font-medium leading-tight">{item.topic_entity ? `#${item.topic_entity}` : 'New review'}</span>
-            <span className="truncate text-sm text-white/70">{name}</span>
+            <span {...counterTake} className="truncate text-[17px] font-medium leading-tight">{item.topic_entity ? `#${item.topic_entity}` : missingMedia ? fallback : 'New review'}</span>
+            <span className="truncate text-sm text-white/70">{missingMedia ? fallback : name}</span>
           </div>
           <div className="absolute bottom-5 right-4 flex flex-col items-center gap-2">
             {heart}
@@ -139,7 +152,7 @@ export function FeedCard(props: FeedCardProps) {
             {follow && !isOwn && creatorId && (
               <button
                 type="button"
-                onClick={() => void social.toggleFollow(creatorId, follow.following)}
+                onClick={() => void social.toggleFollow(creatorId, follow.following, item.id)}
                 aria-pressed={follow.following}
                 className={`min-h-9 rounded-full px-4 text-sm font-medium backdrop-blur-md ${follow.following ? 'border border-white/30 bg-white/10' : 'bg-white text-black'}`}
               >
@@ -152,8 +165,8 @@ export function FeedCard(props: FeedCardProps) {
           </div>
 
           <div className="absolute bottom-8 left-5 right-24 flex flex-col gap-1.5" onClick={stop}>
-            <span className="text-lg font-medium leading-tight">{item.topic_entity ? `#${item.topic_entity}` : 'New review'}</span>
-            {item.ai_summary && <p className="line-clamp-2 text-sm text-white/85">{item.ai_summary}</p>}
+            <span {...counterTake} className="text-lg font-medium leading-tight">{item.topic_entity ? `#${item.topic_entity}` : missingMedia ? fallback : 'New review'}</span>
+            {(item.ai_summary || missingMedia) && <p className="line-clamp-2 text-sm text-white/85">{missingMedia ? fallback : item.ai_summary}</p>}
             {sentiment && (
               <span className="flex items-center gap-1.5 text-xs text-white/75">
                 <span aria-hidden className={`size-2 rounded-full ${sentiment.dot}`} /> {sentiment.label}
@@ -178,7 +191,7 @@ export function FeedCard(props: FeedCardProps) {
 }
 
 /** Plays only while active; neighbouring cards keep a paused, preloaded video so a swipe starts instantly. */
-function PostVideo({ src, active, paused, soundOn, barRef }: { src: string; active: boolean; paused: boolean; soundOn: boolean; barRef: RefObject<HTMLElement | null> }): ReactNode {
+function PostVideo({ src, active, paused, soundOn, barRef, onFailure }: { onFailure: () => void; src: string; active: boolean; paused: boolean; soundOn: boolean; barRef: RefObject<HTMLElement | null> }): ReactNode {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const video = ref.current;
@@ -190,6 +203,7 @@ function PostVideo({ src, active, paused, soundOn, barRef }: { src: string; acti
     <video
       ref={ref}
       src={src}
+      onError={onFailure}
       playsInline
       loop
       autoPlay={active}
