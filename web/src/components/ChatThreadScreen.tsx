@@ -2,6 +2,7 @@
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion';
 import { ArrowUp, Camera, ChevronLeft, Smile } from 'lucide-react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { HoldToViewSnap } from '@/components/HoldToViewSnap';
 import { PrivacyCamera } from '@/components/PrivacyCamera';
@@ -70,7 +71,12 @@ function Thread({ conversationId, viewerId, other, myAvatar }: ThreadProps) {
   const chat = useChatThread(conversationId, viewerId);
   const { messages, isLoading, hasMore, error, peerTyping, peerPresent, peerInRoom, streakCount, streakStatus, retention, reactions, onAvatarAction, setInRoom } = chat;
   const otherAvatar: AvatarId = isAvatarId(other.avatarId) ? other.avatarId : 'cyber_monk';
-  const [text, setText] = useState('');
+  // A vibe typed on the feed arrives as ?draft=…; prefill it once, then drop it from the URL so a reload doesn't repeat it.
+  const draft = useSearchParams().get('draft');
+  const [text, setText] = useState(() => (draft ?? '').slice(0, 2000));
+  useEffect(() => {
+    if (draft !== null) window.history.replaceState(window.history.state, '', window.location.pathname);
+  }, [draft]);
   const [camera, setCamera] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [room, setRoom] = useState(false);

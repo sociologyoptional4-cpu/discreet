@@ -6,6 +6,7 @@ import { REACTION_EMOJIS } from '@/lib/chat/messageFormat';
 /** Microsoft Fluent 3D emoji (MIT), served from jsDelivr. Anything else, or a failed load, falls back to the native glyph. */
 const FLUENT: Record<string, string> = {
   '🔥': 'Fire/3D/fire_3d.png',
+  '😍': 'Smiling face with heart-eyes/3D/smiling_face_with_heart-eyes_3d.png',
   '😂': 'Face with tears of joy/3D/face_with_tears_of_joy_3d.png',
   '❤️': 'Red heart/3D/red_heart_3d.png',
   '💀': 'Skull/3D/skull_3d.png',

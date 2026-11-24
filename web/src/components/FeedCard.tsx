@@ -1,19 +1,16 @@
 'use client';
 import { motion, useReducedMotion } from 'framer-motion';
+import Link from 'next/link';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
-import { ArrowLeft, Heart, MessageCircle, Pause, Play, Share2, Volume2, VolumeX } from 'lucide-react';
+import { Play, Share2, Volume2, VolumeX } from 'lucide-react';
 import { SwipeBubbleOverlay } from '@/components/SwipeBubbleOverlay';
+import { ClayBuddy } from '@/components/chat/AvatarStickerMessage';
+import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
+import { FeedReactionDock, type FeedTag, type FeedToast } from '@/components/feed/FeedReactionDock';
 import type { SocialActions } from '@/hooks/useSocialActions';
 import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
-import { AVATAR_META, STUDIO_BACKDROP } from '@/lib/avatars';
-import type { FeedItem, Sentiment } from '@/types/social';
-
-const compact = (n: number): string => new Intl.NumberFormat('en', { notation: 'compact' }).format(n);
-const SENTIMENT: Record<Sentiment, { dot: string; label: string }> = {
-  positive: { dot: 'bg-emerald-400', label: 'Positive' },
-  negative: { dot: 'bg-rose-400', label: 'Negative' },
-  neutral: { dot: 'bg-white/50', label: 'Neutral' },
-};
+import { STUDIO_BACKDROP } from '@/lib/avatars';
+import type { FeedItem } from '@/types/social';
 
 export type FeedCardProps = {
   item: FeedItem;
@@ -31,67 +28,79 @@ export type FeedCardProps = {
   onShare: () => void;
   onCounterTake: () => void;
   onNotInterested: () => void;
-  onMessage: () => void;
+  /** Sends a typed vibe to the creator. Null when there is no one to send it to (Incog or your own post). */
+  onVibe: ((text: string) => void) | null;
+  /** Every reaction (emoji tap or double-tap like), with where it happened, so the feed can burst and glow. */
+  onReact: (emoji: string, x: number, y: number) => void;
+  /** Mask posts: the PiP card opens the "try another character" rail. */
+  onPip: () => void;
 };
 
-const glass = 'flex items-center justify-center rounded-full bg-white/10 backdrop-blur-md border border-white/15 focus-visible:outline-2 focus-visible:outline-white';
+const REACTIONS = ['😍', '❤️', '😂', '🔥', '😮'] as const;
+const HEART = '❤️';
+const TOAST_MS = 3000;
+const iconBtn = 'flex size-8 items-center justify-center rounded-full bg-white/10 backdrop-blur-md focus-visible:outline-2 focus-visible:outline-white';
 const stop = (event: MouseEvent): void => event.stopPropagation();
 
 /**
- * One post. Collapsed it is a rounded card with two lines of text, a heart and a hairline progress bar; tapping it
- * expands the same element to full screen (so the video or the 3D canvas never reloads) with the creator and three actions.
+ * One full-screen post with no side rail: creator, caption and a PiP card float at the top; toasts, topic pills,
+ * emoji counters and one "Add a vibe" pill float at the bottom. Tap pauses, double-tap likes, long-press hides.
  */
 export function FeedCard(props: FeedCardProps) {
-  const { item, active, near, expanded, paused, soundOn, social, onExpand, onCollapse, onTogglePause, onToggleSound, onShare, onMessage } = props;
+  const { item, active, near, expanded, paused, soundOn, social, onExpand, onTogglePause, onToggleSound, onShare, onReact } = props;
   const longPress = useNegativeFeedback(props.onNotInterested);
-  const counterTake = item.topic_entity ? {
-    role: 'link', tabIndex: 0, 'aria-label': 'Add your take on ' + item.topic_entity,
-    onClick: (event: MouseEvent) => { stop(event); props.onCounterTake(); },
-    onKeyDown: (event: KeyboardEvent) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); props.onCounterTake(); }
-    },
-  } : {};
   const reduceMotion = useReducedMotion();
   const barRef = useRef<HTMLDivElement>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const missingMedia = !item.media_url || failedUrl === item.media_url;
   const fallback = item.transcript || item.ai_summary || 'Media unavailable';
   const [likeBurst, setLikeBurst] = useState(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [toasts, setToasts] = useState<FeedToast[]>([]);
+  const toastSeq = useRef(0);
   const like = social.likeView(item);
   const creatorId = item.user_id;
   const follow = creatorId ? social.followView(creatorId, { following: item.following, followers: item.creator_followers_count ?? 0 }) : null;
   const isOwn = creatorId !== null && social.viewerId === creatorId;
-  const sentiment = item.sentiment ? SENTIMENT[item.sentiment] : null;
   const name = item.is_incog ? (item.incog_alias ?? 'Anon') : `@${item.creator_username}`;
-  const accent = item.creator_avatar_id ? AVATAR_META[item.creator_avatar_id].accent : '#ffffff';
 
-  const toggleLike = (event: MouseEvent) => {
-    stop(event);
-    if (!like.liked) setLikeBurst(Date.now());
-    void social.toggleLike(item.id, like.liked);
+  const toast = (emoji: string) => {
+    const id = ++toastSeq.current;
+    setToasts((list) => [...list.slice(-1), { id, who: 'You', emoji }]);
+    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), TOAST_MS);
+  };
+  const react = (emoji: string, x: number, y: number) => {
+    if (emoji === HEART) {
+      void social.toggleLike(item.id, like.liked);
+      if (like.liked) return; // unliking is not a reaction
+      setLikeBurst((n) => n + 1);
+    } else {
+      setCounts((c) => ({ ...c, [emoji]: (c[emoji] ?? 0) + 1 }));
+    }
+    toast(emoji);
+    onReact(emoji, x, y);
   };
   const doubleTapLike = (event: MouseEvent) => {
     event.preventDefault();
-    if (!like.liked) { setLikeBurst(Date.now()); void social.toggleLike(item.id, false); }
+    if (!like.liked) react(HEART, event.clientX, event.clientY);
   };
   const open = (event: KeyboardEvent) => {
     if (event.shiftKey && event.key === 'F10') { event.preventDefault(); props.onNotInterested(); return; }
-    if (!expanded && (event.key === 'Enter' || event.key === ' ')) {
+    if (!expanded && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
       onExpand();
     }
   };
 
-  const heart = (
-    <button type="button" onClick={toggleLike} aria-pressed={like.liked} aria-label={like.liked ? `Unlike. ${like.count} likes` : `Like. ${like.count} likes`} className={`${glass} size-12`}>
-      <Heart key={String(like.liked)} aria-hidden className={`size-6 ${like.liked ? 'heart-pop fill-rose-500 text-rose-500' : 'text-white'}`} />
-    </button>
-  );
-  const pauseOrb = (size: string) => (
-    <button type="button" onClick={(e) => { stop(e); onTogglePause(); }} aria-label={paused ? 'Play' : 'Pause'} className={`flex items-center justify-center rounded-full border border-white/30 bg-slate-900/70 text-white shadow-[0_8px_22px_rgba(0,0,0,.2)] backdrop-blur-xl focus-visible:outline-2 focus-visible:outline-white ${size}`}>
-      {paused ? <Play aria-hidden className="size-5 fill-white" /> : <Pause aria-hidden className="size-5 fill-white" />}
-    </button>
-  );
+  const tags: FeedTag[] = [
+    ...(item.topic_entity ? [{ label: `#${item.topic_entity.replace(/\s+/g, '_').toLowerCase()}`, onClick: props.onCounterTake }] : []),
+    ...(item.emotion_tag ? [{ label: `#${item.emotion_tag}` }] : []),
+    ...(item.sentiment && item.sentiment !== 'neutral' ? [{ label: `#${item.sentiment}` }] : []),
+  ];
+  const reactions = REACTIONS.map((emoji) => emoji === HEART
+    ? { emoji, count: like.count, pressed: like.liked }
+    : { emoji, count: counts[emoji] ?? 0, pressed: (counts[emoji] ?? 0) > 0 });
+  const vibePlaceholder = props.onVibe ? 'Add a vibe…' : isOwn ? 'Your post' : 'Incog post — vibes are off';
 
   return (
     <motion.div
@@ -117,65 +126,61 @@ export function FeedCard(props: FeedCardProps) {
           <PostVideo src={item.media_url} onFailure={() => setFailedUrl(item.media_url)} active={active} paused={paused} soundOn={soundOn} barRef={barRef} />
         ) : null}
       </div>
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/70 to-transparent" />
-      {expanded && <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-1/4 bg-gradient-to-b from-black/50 to-transparent" />}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-gradient-to-b from-black/60 via-black/25 to-transparent" />
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[55%] bg-gradient-to-t from-black/75 via-black/30 to-transparent" />
 
       {paused && (
-        <div aria-hidden className={`${glass} pointer-events-none absolute left-1/2 top-1/2 size-20 -translate-x-1/2 -translate-y-1/2`}><Play className="size-8 fill-white" /></div>
+        <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 flex size-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-white/10 backdrop-blur-md"><Play className="size-8 fill-white" /></div>
       )}
 
-      {/* hairline progress */}
-      <div aria-hidden className="absolute inset-x-0 bottom-0 h-[2px] bg-white/20">
-        <div data-feed-progress ref={barRef} className="h-full origin-left bg-white" style={{ transform: 'scaleX(0)' }} />
+      {/* hairline playback progress */}
+      <div aria-hidden className="absolute inset-x-0 bottom-0 h-[2px] bg-white/15">
+        <div data-feed-progress ref={barRef} className="h-full origin-left bg-white/80" style={{ transform: 'scaleX(0)' }} />
       </div>
 
-      {/* Top-right sound toggle */}
-      <div className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))]" onClick={stop}>
-        <button type="button" onClick={onToggleSound} aria-pressed={soundOn} aria-label={soundOn ? 'Mute' : 'Turn sound on'} className={`${glass} size-10`}>
-          {soundOn ? <Volume2 aria-hidden className="size-4" /> : <VolumeX aria-hidden className="size-4" />}
-        </button>
-      </div>
-
-      {/* TikTok-style bottom-left creator, topic & summary */}
-      <div className="absolute bottom-24 left-4 right-20 flex flex-col gap-1.5" onClick={stop}>
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-bold">{name}{item.is_incog ? ' • Incog' : ''}</span>
-          {follow && !isOwn && creatorId && (
-            <button
-              type="button"
-              onClick={() => void social.toggleFollow(creatorId, follow.following, item.id)}
-              aria-pressed={follow.following}
-              className={`rounded-full px-3 py-1 text-xs font-semibold backdrop-blur-md ${follow.following ? 'border border-white/30 bg-white/10' : 'bg-white text-black'}`}
-            >
-              {follow.following ? 'Following' : 'Follow'}
-            </button>
-          )}
+      <header className="absolute inset-x-4 top-[calc(max(0.75rem,env(safe-area-inset-top))+0.5rem)] flex items-start gap-3" onClick={stop}>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[15px] font-bold drop-shadow">{name}</span>
+            {follow && !isOwn && creatorId && (
+              <button type="button" onClick={() => void social.toggleFollow(creatorId, follow.following, item.id)} aria-pressed={follow.following}
+                className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold backdrop-blur-md ${follow.following ? 'border border-white/30 bg-white/10' : 'bg-white text-black'}`}>
+                {follow.following ? 'Following' : 'Follow'}
+              </button>
+            )}
+            <span className="ml-auto flex shrink-0 gap-1.5">
+              <button type="button" onClick={onToggleSound} aria-pressed={soundOn} aria-label={soundOn ? 'Mute' : 'Turn sound on'} className={iconBtn}>
+                {soundOn ? <Volume2 aria-hidden className="size-3.5" /> : <VolumeX aria-hidden className="size-3.5" />}
+              </button>
+              <button type="button" onClick={onShare} aria-label="Share this post" className={iconBtn}><Share2 aria-hidden className="size-3.5" /></button>
+            </span>
+          </div>
+          <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-white/85 drop-shadow">
+            {missingMedia ? fallback : item.ai_summary ?? (item.topic_entity ? `A take on ${item.topic_entity}` : 'New review')}
+          </p>
         </div>
-        <span {...counterTake} className="w-fit text-base font-semibold leading-tight">{item.topic_entity ? `#${item.topic_entity}` : missingMedia ? fallback : 'New review'}</span>
-        {(item.ai_summary || missingMedia) && <p className="line-clamp-2 text-sm text-white/85">{missingMedia ? fallback : item.ai_summary}</p>}
-        {sentiment && (
-          <span className="flex items-center gap-1.5 text-xs text-white/75">
-            <span aria-hidden className={`size-2 rounded-full ${sentiment.dot}`} /> {sentiment.label}
-          </span>
-        )}
-      </div>
+        <PipCard item={item} onPip={props.onPip} />
+      </header>
 
-      {/* TikTok-style right-side vertical action rail */}
-      <div className="absolute bottom-24 right-3 flex flex-col items-center gap-4" onClick={stop}>
-        <span aria-hidden className="flex size-11 items-center justify-center rounded-full border-2 bg-black/50 text-xs font-bold backdrop-blur-md" style={{ borderColor: accent, color: accent }}>
-          {name.replace('@', '').slice(0, 2).toUpperCase()}
-        </span>
-        <div className="flex flex-col items-center gap-1">
-          {heart}
-          <span className="text-xs font-medium tabular-nums" aria-hidden>{compact(like.count)}</span>
-        </div>
-        {creatorId && !isOwn && (
-          <button type="button" onClick={onMessage} aria-label={`Message ${name}`} className={`${glass} size-12`}><MessageCircle aria-hidden className="size-6" /></button>
-        )}
-        <button type="button" onClick={onShare} aria-label="Share this post" className={`${glass} size-12`}><Share2 aria-hidden className="size-6" /></button>
+      <div className={`absolute inset-x-4 ${expanded ? 'bottom-[max(1rem,env(safe-area-inset-bottom))]' : 'bottom-[calc(var(--nav-h)+0.25rem)]'}`} onClick={stop} onDoubleClick={stop}>
+        {active && <FeedReactionDock toasts={toasts} tags={tags} reactions={reactions} onReact={react} onVibe={props.onVibe} vibePlaceholder={vibePlaceholder} />}
       </div>
     </motion.div>
   );
+}
+
+/** The rounded-square picture-in-picture card: the creator's mini avatar, or a ghost for Incog posts. */
+function PipCard({ item, onPip }: { item: FeedItem; onPip: () => void }) {
+  const avatar = item.creator_avatar_id ?? item.avatar_id;
+  const inner = (
+    <span className="flex size-full items-center justify-center" style={{ background: avatar ? STUDIO_BACKDROP[avatar] : 'linear-gradient(160deg,#312e81,#0f172a)' }}>
+      {avatar && !item.is_incog ? <ClayBuddy avatarId={avatar} stickerId="wave" size={52} /> : <Emoji3D emoji="👻" size={34} />}
+    </span>
+  );
+  const cls = 'block h-20 w-16 shrink-0 overflow-hidden rounded-2xl border border-white/40 shadow-lg transition-transform active:scale-95 focus-visible:outline-2 focus-visible:outline-white';
+  if (item.mode === 'mask') return <button type="button" onClick={onPip} aria-label="Try this clip on another character" className={cls}>{inner}</button>;
+  if (!item.is_incog && item.creator_username) return <Link href={`/profile/${item.creator_username}`} aria-label={`Open @${item.creator_username}'s profile`} className={cls}>{inner}</Link>;
+  return <span aria-hidden className={cls}>{inner}</span>;
 }
 
 /** Plays only while active; neighbouring cards keep a paused, preloaded video so a swipe starts instantly. */

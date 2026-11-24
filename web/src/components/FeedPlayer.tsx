@@ -10,6 +10,10 @@ import type { AvatarId } from '@/types/avatar';
 import { FeedCard } from '@/components/FeedCard';
 import { LiquidWarpCard } from '@/components/LiquidWarpCard';
 import { SwipeBubbleOverlay } from '@/components/SwipeBubbleOverlay';
+import { ComboBurstLayer, useComboBurst } from '@/components/chat/EmojiReactionSystem';
+import { AIFeedNudge, type FeedNudge } from '@/components/feed/AIFeedNudge';
+import { AuroraEdgeGlow } from '@/components/feed/AuroraEdgeGlow';
+import { FeedGamificationHUD, type FeedMilestone } from '@/components/feed/FeedGamificationHUD';
 import { useFeedEngine } from '@/hooks/useFeedEngine';
 import { trackPost } from '@/lib/telemetry';
 import { counterTakeUrl } from '@/lib/feedClient';
@@ -25,6 +29,20 @@ const PEEK_PX = 0;
 const GAP_PX = 0;
 
 type Props = { items: FeedItem[]; paginate: boolean; snapshot: string };
+
+/** Session-only XP: nothing is stored, a fresh visit starts at zero. */
+const XP = { watch: 5, react: 10, milestone: 20 } as const;
+const LEVEL_XP = 100;
+const WATCH_MILESTONE = 5;
+const REACT_MILESTONE = 3;
+const NUDGE_AFTER = 3;
+const MILESTONE_MS = 2000;
+const NUDGE_MS = 8000;
+
+/** The next post ahead from a creator you follow, if any: the AI nudge points at it. */
+function followedAhead(items: FeedItem[], from: number): FeedItem | undefined {
+  return items.slice(from + 1).find((i) => i.following && !i.is_incog && i.creator_username);
+}
 
 /**
  * Vertical snap feed of rounded cards on a black background. One card is "active" (the one in view) and only that
@@ -67,6 +85,22 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   const [swipe, setSwipe] = useState<{ id: string; direction: 'up' | 'down' } | null>(null);
   const previousIndex = useRef<number | null>(null);
   const social = useSocialActions();
+  const burst = useComboBurst();
+  const [pulse, setPulse] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [xp, setXp] = useState(0);
+  const [milestone, setMilestone] = useState<FeedMilestone | null>(null);
+  const [nudge, setNudge] = useState<FeedNudge | null>(null);
+  const watched = useRef(new Set<string>());
+  const reacted = useRef(0);
+  const nudged = useRef(false);
+
+  const celebrate = (emoji: string, label: string) => {
+    const key = Date.now();
+    setXp((v) => v + XP.milestone);
+    setMilestone({ key, emoji, label, xp: XP.milestone });
+    setTimeout(() => setMilestone((m) => (m?.key === key ? null : m)), MILESTONE_MS);
+  };
 
   const activeId = active?.id;
   const expanded = expandedId !== null;
@@ -82,9 +116,27 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   useEffect(() => {
     if (activeIndex < 0) return;
     if (previousIndex.current !== null && previousIndex.current !== activeIndex && activeId) {
-      setSwipe({ id: `${activeId}-${Date.now()}`, direction: activeIndex > previousIndex.current ? 'up' : 'down' });
+      const now = Date.now();
+      setSwipe({ id: `${activeId}-${now}`, direction: activeIndex > previousIndex.current ? 'up' : 'down' });
+      setPulse(now);
+      setPickerOpen(false);
+      // Each post earns XP once, so scrolling back and forth (or a scroll that flickers between two cards) can't farm it.
+      if (!watched.current.has(activeId)) {
+        watched.current.add(activeId);
+        setXp((v) => v + XP.watch);
+        if (watched.current.size % WATCH_MILESTONE === 0) celebrate('🔥', `${watched.current.size}x Vibe Streak`);
+      }
+      const target = !nudged.current && watched.current.size >= NUDGE_AFTER ? followedAhead(items, activeIndex) : undefined;
+      if (target) {
+        nudged.current = true;
+        const id = `${target.id}-${now}`;
+        setNudge({ id, cta: 'Watch', message: `Oh, you're vibing with this — @${target.creator_username} ki nayi video aayi hai, dekhein?` });
+        setTimeout(() => setNudge((n) => (n?.id === id ? null : n)), NUDGE_MS);
+      }
     }
     previousIndex.current = activeIndex;
+    // celebrate only sets state; items is read for the nudge target at the moment of the swipe
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, activeIndex]);
 
   useEffect(() => {
@@ -129,28 +181,50 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
     else if (result === 'failed') flash('Could not share this post');
   };
 
-  /** Opens the chat if you already talk; otherwise the profile, where a request with a reason can be sent. */
-  const message = async (item: FeedItem) => {
+  /**
+   * A typed vibe goes to the creator as a chat draft when you already talk; otherwise to their profile, where a chat
+   * request with a reason can be sent (the text cannot travel there, so the toast says so).
+   */
+  const sendVibe = async (item: FeedItem, text: string) => {
     if (!item.user_id || !item.creator_username) return;
     try {
       const session = await ensureSession();
       const existing = await findConversationWith(session.user.id, item.user_id);
-      if (existing?.status !== 'accepted') trackPost(item.id, 'profile_visit');
-      router.push(existing?.status === 'accepted' ? `/chats/${existing.id}` : `/profile/${item.creator_username}`);
+      if (existing?.status === 'accepted') {
+        router.push(`/chats/${existing.id}?draft=${encodeURIComponent(text)}`);
+        return;
+      }
     } catch {
-      trackPost(item.id, 'profile_visit');
-      router.push(`/profile/${item.creator_username}`);
+      // fall through to the profile
     }
+    trackPost(item.id, 'profile_visit');
+    flash(`Send @${item.creator_username} a chat request first`);
+    router.push(`/profile/${item.creator_username}`);
+  };
+
+  const react = (emoji: string, x: number, y: number) => {
+    burst.fire(emoji, x, y);
+    setPulse(Date.now());
+    setXp((v) => v + XP.react);
+    reacted.current += 1;
+    if (reacted.current % REACT_MILESTONE === 0) celebrate('💖', `${reacted.current} reactions`);
+  };
+
+  const jumpTo = (postId: string) => {
+    setNudge(null);
+    scrollerRef.current?.querySelector(`[data-post-id="${CSS.escape(postId)}"]`)?.scrollIntoView({ behavior: 'smooth' });
   };
 
   return (
-    <div className="relative h-dvh w-full bg-black text-white">
+    <div className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-black text-white">
       {maskHost && active?.mode === 'mask' && createPortal(
         <>
           <MaskPlayback avatarId={styleFor(active)} motionUrl={active.motion_url} audioUrl={active.media_url} soundOn={soundOn} paused={pausedId === active.id} barRef={maskBar}
             onPlayback={playback} />
-          {/* Try the clip on another character. Local only: the post itself is unchanged. */}
-          <AvatarPickerRail orientation="vertical" className="absolute right-3 top-[18%] z-10 scale-90" selected={styleFor(active) ?? 'cyber_monk'} onSelect={(id) => setStyle({ postId: active.id, avatarId: id })} />
+          {/* Try the clip on another character, opened from the PiP card. Local only: the post itself is unchanged. */}
+          {pickerOpen && (
+            <AvatarPickerRail orientation="vertical" className="absolute right-3 top-[calc(max(0.75rem,env(safe-area-inset-top))+6.25rem)] z-10 scale-90" selected={styleFor(active) ?? 'cyber_monk'} onSelect={(id) => setStyle({ postId: active.id, avatarId: id })} />
+          )}
         </>, maskHost,
       )}
       <LayoutGroup>
@@ -192,7 +266,9 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
                 onCounterTake={() => router.push(counterTakeUrl(item.topic_entity))}
                 onNotInterested={() => { notInterested(item); flash('Not interested'); }}
                 onShare={() => void share(item)}
-                onMessage={() => void message(item)}
+                onVibe={item.user_id && item.creator_username && item.user_id !== social.viewerId ? (text) => void sendVibe(item, text) : null}
+                onReact={react}
+                onPip={() => setPickerOpen((open) => !open)}
               />
               </LiquidWarpCard>
             </article>
@@ -201,6 +277,11 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
         </div>
         <SwipeBubbleOverlay trigger={swipe?.id ?? ''} direction={swipe?.direction} />
       </LayoutGroup>
+      <AuroraEdgeGlow emotion={active?.emotion_tag} pulse={pulse} />
+      <FeedGamificationHUD progress={(xp % LEVEL_XP) / LEVEL_XP} milestone={milestone} />
+      <AIFeedNudge nudge={nudge} onDismiss={() => setNudge(null)}
+        onAction={() => { const target = followedAhead(items, activeIndex); if (target) jumpTo(target.id); else setNudge(null); }} />
+      <ComboBurstLayer bursts={burst.bursts} />
 
       {(note || social.error) && (
         <p role="status" className="fixed inset-x-0 top-6 z-[60] mx-auto w-fit max-w-[90%] rounded-full bg-white/15 px-4 py-2 text-sm font-medium backdrop-blur-md">
