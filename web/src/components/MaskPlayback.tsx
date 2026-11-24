@@ -2,8 +2,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { AvatarStage } from '@/components/AvatarStage';
 import { resolveMediaUrl } from '@/lib/demoData';
-import { loadMotionTrack } from '@/lib/motionTrack';
-import { frameIndexAt } from '@/lib/motionPack';
+import { fetchMotionTrack, sampleMotionFrameAt } from '@/lib/mocap/motionCodec';
 import type { AvatarId, MotionFrame } from '@/types/avatar';
 import type { MotionTrackFile } from '@/types/social';
 
@@ -20,9 +19,8 @@ type Props = {
 };
 
 /**
- * Plays one 3D mask post: downloads its motion track, plays its audio, and drives the avatar from the audio clock.
- * It owns the only WebGL canvas on the feed, so mount a single instance (the active card) at a time.
- * Audio keeps its clock while muted, so lip-sync is unchanged when the sound is off.
+ * Plays one 3D mask post: downloads/decompresses its motion track, plays its audio, and drives VRM/avatar
+ * interpolation strictly from `audio.currentTime` with zero lip-sync drift.
  */
 export function MaskPlayback({ avatarId, motionUrl, audioUrl, soundOn, paused = false, barRef, onPlayback }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -33,11 +31,11 @@ export function MaskPlayback({ avatarId, motionUrl, audioUrl, soundOn, paused = 
 
   useEffect(() => {
     if (!motionUrl) return;
-    let alive = true;
-    void loadMotionTrack(motionUrl).then((result) => {
-      if (alive) setLoaded({ url: motionUrl, track: result });
+    const ctrl = new AbortController();
+    void fetchMotionTrack(motionUrl, ctrl.signal).then((result) => {
+      if (!ctrl.signal.aborted) setLoaded({ url: motionUrl, track: result });
     });
-    return () => { alive = false; };
+    return () => ctrl.abort();
   }, [motionUrl]);
 
   useEffect(() => {
@@ -47,7 +45,7 @@ export function MaskPlayback({ avatarId, motionUrl, audioUrl, soundOn, paused = 
     const tick = () => {
       const audio = audioRef.current;
       if (audio) {
-        currentFrameRef.current = track.frames[frameIndexAt(audio.currentTime, track.fps, track.frames.length)] ?? null;
+        currentFrameRef.current = sampleMotionFrameAt(track.frames, audio.currentTime, track.fps);
         const bar = barRef?.current;
         if (bar) bar.style.transform = `scaleX(${Math.min(1, audio.currentTime / (track.frames.length / track.fps))})`;
       }
@@ -61,13 +59,24 @@ export function MaskPlayback({ avatarId, motionUrl, audioUrl, soundOn, paused = 
     const audio = audioRef.current;
     if (!audio) return;
     if (paused) audio.pause();
-    else void audio.play().catch(() => {}); // blocked autoplay just leaves the avatar waiting for the next tap
+    else void audio.play().catch(() => {});
   }, [audioUrl, soundOn, paused]);
 
   return (
     <div className="relative flex size-full items-center">
       <AvatarStage fill avatarId={avatarId ?? track?.avatarId ?? 'cyber_monk'} currentFrameRef={currentFrameRef} />
-      <audio ref={audioRef} onPlaying={() => onPlayback?.(true)} onPause={() => onPlayback?.(false)} onWaiting={() => onPlayback?.(false)} src={resolveMediaUrl(audioUrl)} loop autoPlay playsInline preload="auto" muted={!soundOn} />
+      <audio
+        ref={audioRef}
+        onPlaying={() => onPlayback?.(true)}
+        onPause={() => onPlayback?.(false)}
+        onWaiting={() => onPlayback?.(false)}
+        src={resolveMediaUrl(audioUrl)}
+        loop
+        autoPlay
+        playsInline
+        preload="auto"
+        muted={!soundOn}
+      />
       {!track && (
         <p role="status" className="absolute left-1/2 top-1/3 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white/80">
           {failed ? 'Couldn’t load this 3D clip' : 'Loading 3D clip…'}

@@ -1,25 +1,24 @@
 'use client';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { CameraOff, LoaderCircle, Square } from 'lucide-react';
-import type { FaceLandmarker, HandLandmarker, HandLandmarkerResult } from '@mediapipe/tasks-vision';
+import type { HandLandmarkerResult, PoseLandmarkerResult } from '@mediapipe/tasks-vision';
 import { AvatarSelector } from '@/components/AvatarSelector';
 import { VoiceWaveform } from '@/components/VoiceWaveform';
 import { PrismaticLiquidBlob } from '@/components/PrismaticLiquidBlob';
 import { AvatarStage } from '@/components/AvatarStage';
 import { MAX_RECORDING_SECONDS } from '@/hooks/usePrivacyRecorder';
-import { extractMotionFrame, hasTrackedFace } from '@/lib/avatarRetargeter';
-import { getFaceLandmarker, getHandLandmarker } from '@/lib/mediapipe';
-import { MOTION_FPS, measureMotionKB } from '@/lib/motionPack';
+import { encodeMotionTrackGzip } from '@/lib/mocap/motionCodec';
+import { AudioLipSyncAnalyser, MotionSolver } from '@/lib/mocap/retargeter';
+import { loadVisionModels, type VisionModels } from '@/lib/mocap/visionEngine';
+import { MOTION_FPS } from '@/lib/motionPack';
 import { EmotionSmoother } from '@/lib/emotionDetector';
 import type { EmotionTag } from '@/lib/emotions';
 import type { AvatarId, MaskRecordingPayload, MotionFrame } from '@/types/avatar';
 
-const FRAME_MS = 1000 / MOTION_FPS;
-const HAND_EVERY_N_FRAMES = 2; // hands change slower than faces; detecting every other frame halves the cost
 const AUDIO_MIME_ORDER = ['audio/webm;codecs=opus', 'audio/mp4'] as const; // mp4 is what iOS Safari can record
 
 type ModelsState = 'loading' | 'ready' | 'error';
-type Models = { face: FaceLandmarker; hand: HandLandmarker };
+type Models = VisionModels;
 
 export type MaskRecorderProps = {
   /** Called when the smoothed live emotion changes (not every frame). */
@@ -66,7 +65,8 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
   const recordingRef = useRef(false);
   const startedAtRef = useRef(0);
   const modelsRef = useRef<Models | null>(null);
-  const lastHeadRef = useRef<[number, number, number]>([0, 0, 0]);
+  const solverRef = useRef(new MotionSolver());
+  const audioAnalyserRef = useRef(new AudioLipSyncAnalyser());
   const recorderRef = useRef<MediaRecorder | null>(null);
   const timersRef = useRef<{ tick: ReturnType<typeof setInterval> | null; max: ReturnType<typeof setTimeout> | null }>({ tick: null, max: null });
   const aliveRef = useRef(true);
@@ -89,13 +89,19 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const analyser = audioAnalyserRef.current;
+    analyser.connect(audioStream);
+    return () => analyser.dispose();
+  }, [audioStream]);
+
   // The landmark models are shared singletons owned by the parent, which disposes them when the camera closes.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getFaceLandmarker(), getHandLandmarker()])
-      .then(([face, hand]) => {
+    loadVisionModels()
+      .then((loaded) => {
         if (cancelled) return;
-        modelsRef.current = { face, hand };
+        modelsRef.current = loaded;
         setModels('ready');
       })
       .catch(() => { if (!cancelled) setModels('error'); });
@@ -105,42 +111,42 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
     };
   }, [modelsAttempt]);
 
-  // Tracking loop: camera frame -> motion frame -> live avatar, and into the buffer while recording.
+  // Tracking loop: camera frame -> 1-Euro smoothed MotionFrame -> live avatar, and into buffer while recording.
   useEffect(() => {
     if (models !== 'ready') return;
     const video = videoRef.current;
     if (!video) return;
+    const solver = solverRef.current;
+    solver.reset();
     const liveStart = performance.now();
     let raf = 0;
     let lastRun = 0;
     let lastTs = 0;
     let count = 0;
     let hands: HandLandmarkerResult | null = null;
+    let pose: PoseLandmarkerResult | null = null;
 
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
-      if (now - lastRun < FRAME_MS - 2) return; // ~30 FPS
-      lastRun = now;
       const m = modelsRef.current;
-      if (!m || video.readyState < 2 || !video.videoWidth) return;
-      const ts = Math.max(performance.now(), lastTs + 1); // MediaPipe needs strictly increasing timestamps
+      if (!m) return;
+      const intervalMs = 1000 / m.profile.targetFps;
+      if (now - lastRun < intervalMs - 2) return;
+      lastRun = now;
+      if (video.readyState < 2 || !video.videoWidth) return;
+      const ts = Math.max(performance.now(), lastTs + 1);
       lastTs = ts;
       try {
         const face = m.face.detectForVideo(video, ts);
-        if (!hands || count % HAND_EVERY_N_FRAMES === 0) hands = m.hand.detectForVideo(video, ts);
+        if (m.pose && count % 2 === 0) pose = m.pose.detectForVideo(video, ts);
+        if (m.hand && (!hands || count % m.profile.handEveryNFrames === 0)) hands = m.hand.detectForVideo(video, ts);
         count += 1;
         const rec = recordingRef.current;
         const t = (performance.now() - (rec ? startedAtRef.current : liveStart)) / 1000;
-        let frame: MotionFrame;
-        if (hasTrackedFace(face)) {
-          frame = extractMotionFrame(face, hands, t);
-          lastHeadRef.current = frame.head;
-        } else {
-          frame = { t: round3(t), head: lastHeadRef.current, shapes: {} }; // face lost: keep the pose, close the mouth
-        }
+        const audioJawFallback = audioAnalyserRef.current.sampleJawOpen();
+        const frame = solver.solve(face, pose, hands, t, { mirrored, audioJawFallback });
         currentFrameRef.current = frame;
         if (rec) {
-          // One frame per 1/fps exactly, so playback can index by `time * fps`. A late tick repeats the last frame.
           const buffer = framesBufferRef.current;
           const target = Math.floor(t * MOTION_FPS);
           while (buffer.length <= target) buffer.push({ ...frame, t: round3(buffer.length / MOTION_FPS) });
@@ -151,7 +157,7 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [models, videoRef]);
+  }, [models, videoRef, mirrored]);
 
   const clearTimers = useCallback(() => {
     const t = timersRef.current;
@@ -175,7 +181,8 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
       return;
     }
     setFinishing(true);
-    const compressedSizeKB = await measureMotionKB(frames);
+    const compressedBytes = encodeMotionTrackGzip({ avatarId: avatarRef.current, fps: MOTION_FPS, frames });
+    const compressedSizeKB = Math.round((compressedBytes.byteLength / 1024) * 10) / 10;
     if (!aliveRef.current) return;
     setFinishing(false);
     const audioBlob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });

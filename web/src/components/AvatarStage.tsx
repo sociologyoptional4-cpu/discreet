@@ -1,10 +1,12 @@
 'use client';
-import { Component, Suspense, useMemo, useRef, type ReactNode, type RefObject } from 'react';
+import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
+import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneRig } from 'three/addons/utils/SkeletonUtils.js';
-import { applyMotionFrameToRig } from '@/lib/avatarRetargeter';
+import { applyMotionToVRM } from '@/lib/mocap/retargeter';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
 import type { AvatarId, MotionFrame } from '@/types/avatar';
 
@@ -25,47 +27,108 @@ const THEMES: Record<AvatarId, Theme> = {
   neon_bot: { skin: '#7ef3ff', body: '#12202b', accent: '#39ff88', rim: '#39ff88' },
 };
 
-/** Frame-rate independent easing: about 0.3 per frame at 60 FPS, and the same speed at any other rate. */
 const ease = (delta: number): number => 1 - Math.exp(-delta * 22);
 const lerp = THREE.MathUtils.lerp;
 const clamp = THREE.MathUtils.clamp;
 
-/* -------------------------------------------------------------- GLB path */
+/* ---------------------------------------------------------------- VRM Path */
 
-const missingGlb = new Set<AvatarId>(['cyber_monk', 'street_artist', 'cozy_bear', 'neon_bot']); // use the procedural set; no GLB downloads or extra waiting states
+const VRM_CACHE_NAME = 'vybe-vrm-cache-v1';
+const missingVrm = new Set<AvatarId>();
+
+async function fetchVrmBuffer(url: string, signal: AbortSignal): Promise<ArrayBuffer> {
+  if (typeof caches !== 'undefined') {
+    try {
+      const cache = await caches.open(VRM_CACHE_NAME);
+      const cached = await cache.match(url);
+      if (cached && cached.ok) return await cached.arrayBuffer();
+      const res = await fetch(url, { signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await cache.put(url, res.clone());
+      return await res.arrayBuffer();
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err;
+    }
+  }
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.arrayBuffer();
+}
+
+function VrmAvatar({ avatarId, currentFrameRef, onUnavailable }: Props & { onUnavailable: () => void }) {
+  const [vrm, setVrm] = useState<VRM | null>(null);
+  const onUnavailableRef = useRef(onUnavailable);
+  useEffect(() => { onUnavailableRef.current = onUnavailable; }, [onUnavailable]);
+
+  useEffect(() => {
+    if (missingVrm.has(avatarId)) {
+      onUnavailableRef.current();
+      return;
+    }
+    const ctrl = new AbortController();
+    let loaded: VRM | null = null;
+    const url = `/avatars/${avatarId}.vrm`;
+
+    fetchVrmBuffer(url, ctrl.signal)
+      .then((buf) => {
+        if (ctrl.signal.aborted) return;
+        const loader = new GLTFLoader();
+        loader.register((parser) => new VRMLoaderPlugin(parser));
+        return loader.parseAsync(buf, url);
+      })
+      .then((gltf) => {
+        if (!gltf || ctrl.signal.aborted) return;
+        const instance = gltf.userData.vrm as VRM | undefined;
+        if (!instance) throw new Error('Invalid VRM asset');
+        VRMUtils.removeUnnecessaryVertices(gltf.scene);
+        VRMUtils.combineSkeletons(gltf.scene);
+        VRMUtils.rotateVRM0(instance);
+
+        // Normalize scale & framing to match 9:16 stage
+        instance.scene.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(instance.scene);
+        const size = box.getSize(new THREE.Vector3());
+        const scale = 1.45 / Math.max(size.y, 0.001);
+        instance.scene.scale.setScalar(scale);
+        instance.scene.position.set(0, -box.min.y * scale - 0.85, 0);
+
+        loaded = instance;
+        setVrm(instance);
+      })
+      .catch((err) => {
+        if ((err as Error)?.name === 'AbortError') return;
+        missingVrm.add(avatarId);
+        onUnavailableRef.current();
+      });
+
+    return () => {
+      ctrl.abort();
+      if (loaded) {
+        VRMUtils.deepDispose(loaded.scene);
+        loaded = null;
+      }
+      setVrm(null);
+    };
+  }, [avatarId]);
+
+  useFrame(({ clock }, delta) => {
+    if (!vrm) return;
+    applyMotionToVRM(vrm, currentFrameRef.current, Math.min(delta, 0.05), clock.elapsedTime);
+  });
+
+  return vrm ? <primitive object={vrm.scene} /> : null;
+}
+
+/* -------------------------------------------------------------- GLB Fallback */
 
 class GlbBoundary extends Component<{ id: AvatarId; fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError(): { failed: boolean } {
     return { failed: true };
   }
-  componentDidCatch(): void {
-    missingGlb.add(this.props.id);
-  }
   render(): ReactNode {
     return this.state.failed ? this.props.fallback : this.props.children;
   }
-}
-
-/** A rigged `.glb`, scaled to the frame and driven through the retargeter (ARKit morph targets, `Head`, hands). */
-function GlbAvatar({ avatarId, currentFrameRef }: Props) {
-  const { scene } = useGLTF(`/avatars/${avatarId}.glb`);
-  const model = useMemo(() => {
-    const copy = cloneRig(scene); // each stage gets its own skeleton, the cached original is never mutated
-    const box = new THREE.Box3().setFromObject(copy);
-    const size = box.getSize(new THREE.Vector3());
-    const centre = box.getCenter(new THREE.Vector3());
-    const scale = 1.3 / Math.max(size.y, 0.001);
-    copy.scale.setScalar(scale);
-    copy.position.set(-centre.x * scale, -centre.y * scale + 0.05, -centre.z * scale);
-    return copy;
-  }, [scene]);
-
-  useFrame((_, delta) => {
-    const frame = currentFrameRef.current;
-    if (frame) applyMotionFrameToRig(model, frame, { smoothing: ease(delta) });
-  });
-  return <primitive object={model} />;
 }
 
 const GAME4_NODE: Record<AvatarId, string> = {
@@ -82,7 +145,7 @@ function Game4Avatar({ avatarId, currentFrameRef }: Props) {
   const model = useMemo(() => {
     if (!source) return null;
     const copy = cloneRig(source);
-    copy.position.set(0, 0, 0); // drop its spot in the pack, or the centring below aims at the wrong place
+    copy.position.set(0, 0, 0);
     copy.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(copy);
     const size = box.getSize(new THREE.Vector3());
@@ -92,6 +155,7 @@ function Game4Avatar({ avatarId, currentFrameRef }: Props) {
     copy.position.set(-centre.x * scale, -box.min.y * scale - 0.45, -centre.z * scale);
     return copy;
   }, [source]);
+
   useFrame((_, delta) => {
     const frame = currentFrameRef.current;
     const renderedModel = modelRef.current;
@@ -110,12 +174,8 @@ const Material = ({ color, glow = 0, opacity = 1, roughness = 0.6, clearcoat = 0
 );
 
 const HAND_REST = { x: 0.3, y: -0.12, z: 0.22 };
-const HAND_X_LIMIT = 0.43; // keeps floating hands inside a 9:16 frame at this camera distance
+const HAND_X_LIMIT = 0.43;
 
-/**
- * Stand-in character built from primitives. It reads the same frame as a real rig and moves its parts directly:
- * head rotation, blinking, brows, jaw and mouth, and two floating hands.
- */
 export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
   const theme = THEMES[avatarId];
   const head = useRef<THREE.Group>(null);
@@ -127,10 +187,10 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
   const opening = useRef<THREE.Mesh>(null);
   const cornerL = useRef<THREE.Mesh>(null);
   const cornerR = useRef<THREE.Mesh>(null);
-  const handL = useRef<THREE.Group>(null); // the avatar's left hand is on the viewer's right
+  const handL = useRef<THREE.Group>(null);
   const handR = useRef<THREE.Group>(null);
   const root = useRef<THREE.Group>(null);
-  const nextBlink = useRef(3.4); // first idle blink; later ones are rescheduled 3–5 s apart at random
+  const nextBlink = useRef(3.4);
 
   useFrame(({ clock, pointer }, delta) => {
     const frame = currentFrameRef.current;
@@ -144,7 +204,6 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
       head.current.rotation.y = to(head.current.rotation.y, frame?.head[1] ?? 0);
       head.current.rotation.z = to(head.current.rotation.z, frame?.head[2] ?? 0);
     }
-    // Eyes squash flat to blink and widen a little; brows lift with browInnerUp and drop with browDown.
     for (const [eye, side] of [[eyeL, 'Left'], [eyeR, 'Right']] as const) {
       if (eye.current) eye.current.scale.y = to(eye.current.scale.y, 1 - shape(`eyeBlink${side}`) * 0.92 + shape(`eyeWide${side}`) * 0.25);
     }
@@ -154,7 +213,6 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
       brow.current.position.y = to(brow.current.position.y, 0.115 + lift);
       brow.current.rotation.z = to(brow.current.rotation.z, (side === 'Left' ? -1 : 1) * (shape(`browDown${side}`) - shape('browInnerUp')) * 0.35);
     }
-    // Jaw drops, the mouth opening grows, the corners rise with a smile and pull in with a pucker.
     const jawOpen = shape('jawOpen');
     const pucker = shape('mouthPucker');
     if (chin.current) chin.current.position.y = to(chin.current.position.y, -0.05 - jawOpen * 0.075);
@@ -166,7 +224,6 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
     if (cornerL.current) cornerL.current.position.y = to(cornerL.current.position.y, shape('mouthSmileLeft') * 0.035);
     if (cornerR.current) cornerR.current.position.y = to(cornerR.current.position.y, shape('mouthSmileRight') * 0.035);
 
-    // Hands float with a gentle bob and follow the wrist; a hand that leaves the frame eases back to rest.
     const t = clock.elapsedTime;
     if (root.current) {
       root.current.position.y = Math.sin(t * 1.15) * 0.018;
@@ -190,7 +247,6 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
   const robot = avatarId === 'neon_bot';
   return (
     <group ref={root}>
-      {/* body */}
       <mesh position={[0, -0.42, 0]}>
         <capsuleGeometry args={[0.2, 0.3, 8, 16]} />
         <Material color={theme.body} />
@@ -201,7 +257,6 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
           <Material color="#b45309" />
         </mesh>
       )}
-
       <group ref={head} position={[0, 0.22, 0]}>
         {robot ? (
           <mesh>
@@ -214,8 +269,6 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
             <Material color={theme.skin} roughness={0.75} clearcoat={0.08} />
           </mesh>
         )}
-
-        {/* eyes: bot has LED eyes, everyone else white eyeballs with pupils */}
         {([[eyeL, 1], [eyeR, -1]] as const).map(([ref, side]) => (
           <mesh key={side} ref={ref} position={[side * 0.095, 0.04, 0.22]}>
             {robot ? <boxGeometry args={[0.07, 0.06, 0.03]} /> : <sphereGeometry args={[0.04, 16, 12]} />}
@@ -240,8 +293,6 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
           <sphereGeometry args={[0.024, 12, 8]} />
           <Material color={theme.accent} />
         </mesh>
-
-        {/* mouth: dark opening, a chin that drops with the jaw, and two corners that rise with a smile */}
         <group position={[0, -0.1, 0.225]}>
           <mesh ref={opening} scale={[0.5, 0.08, 0.2]}>
             <sphereGeometry args={[0.1, 16, 12]} />
@@ -260,13 +311,11 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
             <Material color="#2a0710" />
           </mesh>
         </group>
-
         {avatarId === 'cyber_monk' && <MonkGear accent={theme.accent} hood={theme.body} />}
         {avatarId === 'street_artist' && <ArtistGear accent={theme.accent} />}
         {avatarId === 'cozy_bear' && <BearGear skin={theme.skin} inner={theme.accent} />}
         {robot && <BotGear accent={theme.accent} />}
       </group>
-
       {([[handL, 1], [handR, -1]] as const).map(([ref, side]) => (
         <group key={side} ref={ref} position={[side * HAND_REST.x, HAND_REST.y, HAND_REST.z]}>
           <mesh>
@@ -283,7 +332,6 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
   );
 }
 
-/** Hood with an open front and a glowing cyan visor across the eyes. */
 function MonkGear({ accent, hood }: { accent: string; hood: string }) {
   return (
     <>
@@ -299,7 +347,6 @@ function MonkGear({ accent, hood }: { accent: string; hood: string }) {
   );
 }
 
-/** Tilted cap and neon headphones. */
 function ArtistGear({ accent }: { accent: string }) {
   return (
     <>
@@ -327,7 +374,6 @@ function ArtistGear({ accent }: { accent: string }) {
   );
 }
 
-/** Round ears and a soft muzzle. */
 function BearGear({ skin, inner }: { skin: string; inner: string }) {
   return (
     <>
@@ -349,7 +395,6 @@ function BearGear({ skin, inner }: { skin: string; inner: string }) {
   );
 }
 
-/** A holographic antenna: a mast, a glowing tip and a translucent cone of light above it. */
 function BotGear({ accent }: { accent: string }) {
   return (
     <>
@@ -371,7 +416,6 @@ function BotGear({ accent }: { accent: string }) {
 
 /* ------------------------------------------------------------------ stage */
 
-/** Backs the camera off on frames narrower than 9:16, so the character and its hands are not cropped at the sides. */
 function FitCamera() {
   useFrame(({ camera, size }) => {
     const target = 2.4 * Math.max(1, 0.5625 / (size.width / size.height));
@@ -380,32 +424,65 @@ function FitCamera() {
   return null;
 }
 
-function Character(props: Props) {
-  const stand = <ProceduralAvatar {...props} />;
+function Character({ avatarId, currentFrameRef }: Props) {
+  const [failedVrmFor, setFailedVrmFor] = useState<AvatarId | null>(null);
+  const useVrm = !missingVrm.has(avatarId) && failedVrmFor !== avatarId;
+
+  if (useVrm) {
+    return (
+      <VrmAvatar
+        avatarId={avatarId}
+        currentFrameRef={currentFrameRef}
+        onUnavailable={() => setFailedVrmFor(avatarId)}
+      />
+    );
+  }
+  const stand = <ProceduralAvatar avatarId={avatarId} currentFrameRef={currentFrameRef} />;
   return (
-    <GlbBoundary key={props.avatarId} id={props.avatarId} fallback={stand}>
+    <GlbBoundary key={avatarId} id={avatarId} fallback={stand}>
       <Suspense fallback={null}>
-        <Game4Avatar {...props} />
+        <Game4Avatar avatarId={avatarId} currentFrameRef={currentFrameRef} />
       </Suspense>
     </GlbBoundary>
   );
 }
 
 /**
- * The one and only WebGL canvas. By default it is a 9:16 frame; with `fill` it fills its parent instead (the feed card
- * decides the shape). Mount a single AvatarStage at a time: browsers allow only a handful of WebGL contexts.
- * The canvas is transparent over a muted studio gradient chosen by character.
+ * The single shared WebGL canvas. Caps DPR at [1, 1.5] for iOS Safari stability and recovers from context loss.
  */
 export function AvatarStage({ avatarId, currentFrameRef, fill = false }: Props & { fill?: boolean }) {
+  const [contextLost, setContextLost] = useState(false);
+
   return (
     <div className={`relative overflow-hidden ${fill ? 'size-full' : 'aspect-[9/16] w-full'}`} style={{ background: STUDIO_BACKDROP[avatarId] }}>
-      <Canvas dpr={[1, 2]} gl={{ alpha: true }} camera={{ position: [0, 0.2, 2.4], fov: 38 }} style={{ position: 'absolute', inset: 0 }} aria-label="3D avatar">
+      <Canvas
+        dpr={[1, 1.5]}
+        gl={{ alpha: true, powerPreference: 'high-performance', antialias: true }}
+        camera={{ position: [0, 0.2, 2.4], fov: 38 }}
+        style={{ position: 'absolute', inset: 0 }}
+        aria-label="3D avatar"
+        onCreated={({ gl }) => {
+          const canvas = gl.domElement;
+          canvas.addEventListener('webglcontextlost', (e) => {
+            e.preventDefault();
+            setContextLost(true);
+          });
+          canvas.addEventListener('webglcontextrestored', () => {
+            setContextLost(false);
+          });
+        }}
+      >
         <FitCamera />
         <ambientLight intensity={1.0} />
         <directionalLight position={[1.5, 2.5, 3]} intensity={2.2} />
         <directionalLight position={[-2, 1.2, -2]} intensity={3} color={THEMES[avatarId].rim} />
         <Character avatarId={avatarId} currentFrameRef={currentFrameRef} />
       </Canvas>
+      {contextLost && (
+        <div role="status" className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs font-medium text-white backdrop-blur-sm">
+          Restoring 3D character…
+        </div>
+      )}
     </div>
   );
 }

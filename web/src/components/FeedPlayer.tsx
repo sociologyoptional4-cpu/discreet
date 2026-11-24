@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AvatarPickerRail } from '@/components/AvatarPickerRail';
 import { MaskPlayback } from '@/components/MaskPlayback';
+import { fetchMotionTrack } from '@/lib/mocap/motionCodec';
 import type { AvatarId } from '@/types/avatar';
 import { FeedCard } from '@/components/FeedCard';
 import { LiquidWarpCard } from '@/components/LiquidWarpCard';
@@ -69,6 +70,14 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
 
   const activeId = active?.id;
   const expanded = expandedId !== null;
+
+  useEffect(() => {
+    const next = items[activeIndex + 1];
+    if (!next || next.mode !== 'mask' || !next.motion_url) return;
+    const ctrl = new AbortController();
+    void fetchMotionTrack(next.motion_url, ctrl.signal);
+    return () => ctrl.abort();
+  }, [items, activeIndex]);
 
   useEffect(() => {
     if (activeIndex < 0) return;
