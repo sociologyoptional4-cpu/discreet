@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import "tailwindcss" source("../");
 
 :root {
   /* Light, emotion-centred theme: matte off-white canvas, white elevated cards, dark-ink text. */
