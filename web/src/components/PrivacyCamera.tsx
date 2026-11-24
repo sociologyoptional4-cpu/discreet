@@ -1,28 +1,10 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  ArrowLeft,
-  CameraOff,
-  Check,
-  Gauge,
-  Grid3x3,
-  ImagePlus,
-  LoaderCircle,
-  Lock,
-  RotateCcw,
-  Sparkles,
-  Square,
-  Sun,
-  SwitchCamera,
-  Timer,
-  Wand2,
-  X,
-  Zap,
-  ZapOff,
-} from 'lucide-react';
+import { ArrowLeft, Check, Lock, RotateCcw, Square, Sun, SwitchCamera, VenetianMask, X } from 'lucide-react';
 import type { Detection, FaceDetector, ImageSegmenter } from '@mediapipe/tasks-vision';
-import { motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { ArFramingGuide, CameraCategoryStrip, CameraDeviceToggle, CameraTopRail, CameraXpBar, GLASS, ZoomBadge, glassIconBtn } from '@/components/camera/CameraControls';
 import { CameraViewfinder } from '@/components/camera/CameraViewfinder';
 import { LensCarousel, type CarouselOrbItem } from '@/components/camera/LensCarousel';
 import {
@@ -79,8 +61,7 @@ export type PrivacyCameraProps = {
 
 const formatTime = (s: number): string => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-const frostedIconBtn =
-  'flex size-10 items-center justify-center rounded-full backdrop-blur-xl bg-white/75 border border-white/90 shadow-md text-slate-900 focus-visible:outline-2 focus-visible:outline-slate-900 disabled:opacity-40';
+const XP_PER_BAR = 100;
 
 export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose, className = '' }: PrivacyCameraProps) {
   const router = useRouter();
@@ -94,7 +75,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
 
   // Default Mode = 'normal' (Real Face Camera + Aesthetic Filters + AR Lenses)
   const [mode, setMode] = useState<CameraMode>('normal');
-  const [liveEmotion, setLiveEmotion] = useState<EmotionTag>('chill');
+  const [, setLiveEmotion] = useState<EmotionTag>('chill'); // MaskRecorder reports it; the avatar shows it
 
   const {
     videoRef,
@@ -125,6 +106,9 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   const [countdown, setCountdown] = useState<number | null>(null);
   const [speedRate, setSpeedRate] = useState<SpeedRate>(1);
   const [showGrid, setShowGrid] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  /** Bumped on every gesture zoom so the read-out remounts and fades again. */
+  const [zoomHint, setZoomHint] = useState(0);
   const [filterId, setFilterId] = useState<AestheticFilterId>('clean');
   const [lensId, setLensId] = useState<ArLensId>('none');
   const [lensCategory, setLensCategory] = useState<'snap' | 'studio'>(() =>
@@ -143,6 +127,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     exploredIds,
     toast: explorerToast,
     mysteryBurstActive,
+    sessionXp,
     recordLensTry,
     triggerMysteryUnlock,
   } = useLensGamification();
@@ -467,6 +452,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     const dx = start.x - e.clientX;
     if (dy > 10) {
       setZoom(start.zoom + (dy - 10) / 80);
+      setZoomHint((n) => n + 1);
     }
     if (dx > 55 && !handsFreeLocked) {
       haptic(20);
@@ -514,6 +500,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const dist = Math.hypot(dx, dy);
       setZoom(pinchStartZoomRef.current * (dist / pinchStartDistRef.current));
+      setZoomHint((n) => n + 1);
     }
   };
 
@@ -605,7 +592,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       type="button"
       onClick={() => (onClose ? onClose() : router.push('/feed'))}
       aria-label={onClose ? 'Close camera' : 'Back to feed'}
-      className={frostedIconBtn}
+      className={glassIconBtn}
     >
       {onClose ? <X aria-hidden className="size-5" /> : <ArrowLeft aria-hidden className="size-5" />}
     </button>
@@ -617,7 +604,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       onClick={() => void flipCamera()}
       disabled={camPhase !== 'ready' || recorder.isRecording || maskRecording}
       aria-label="Flip camera"
-      className={frostedIconBtn}
+      className={glassIconBtn}
     >
       <SwitchCamera aria-hidden className="size-4" />
     </button>
@@ -719,7 +706,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   );
 
   const progress = Math.min(1, recorder.totalRecordedSec / durationLimit);
-  const ringR = 38;
+  const ringR = 40;
   const ringC = 2 * Math.PI * ringR;
   const ringOffset = ringC * (1 - progress);
 
@@ -734,14 +721,14 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       onPointerCancel={onShutterPointerUp}
       disabled={!recorder.isRecording && !canRecord}
       aria-label={recorder.isRecording ? 'Stop recording' : 'Tap for photo, hold for video'}
-      className="relative flex size-20 touch-none items-center justify-center rounded-full border-4 border-white/95 bg-white/30 shadow-[0_10px_30px_rgba(15,23,42,0.28)] backdrop-blur-md transition-transform active:scale-95 disabled:opacity-40"
+      className="relative flex size-[72px] touch-none items-center justify-center rounded-full border-[3.5px] border-white bg-white/10 shadow-[0_6px_24px_rgba(0,0,0,0.35)] transition-transform will-change-transform active:scale-95 disabled:opacity-40"
     >
       {(recorder.isRecording || recorder.segments.length > 0) && (
-        <svg aria-hidden viewBox="0 0 84 84" className="pointer-events-none absolute -inset-1 size-[calc(100%+8px)] -rotate-90">
-          <circle cx="42" cy="42" r={ringR} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="4" />
+        <svg aria-hidden viewBox="0 0 88 88" className="pointer-events-none absolute -inset-[11px] size-[calc(100%+22px)] -rotate-90">
+          <circle cx="44" cy="44" r={ringR} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="4" />
           <circle
-            cx="42"
-            cy="42"
+            cx="44"
+            cy="44"
             r={ringR}
             fill="none"
             stroke="#38bdf8"
@@ -757,10 +744,13 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
           <Square aria-hidden className="size-5 fill-white text-white" />
         </span>
       ) : activeOrb?.iconUrl ? (
-        <img src={activeOrb.iconUrl} alt={activeOrb.name} className="size-14 rounded-full object-cover ring-2 ring-white" />
-      ) : (
-        <span className="size-14 rounded-full bg-gradient-to-tr from-rose-500 via-violet-500 to-cyan-400 shadow-inner" />
-      )}
+        // eslint-disable-next-line @next/next/no-img-element -- lens thumbnail from the Camera Kit CDN
+        <img src={activeOrb.iconUrl} alt="" className="size-[54px] rounded-full object-cover" />
+      ) : activeOrb?.swatch ? (
+        <span aria-hidden className="size-[54px] rounded-full" style={{ background: activeOrb.swatch }} />
+      ) : activeOrb?.badge && activeOrb.id !== 'clean' ? (
+        <span aria-hidden className="text-2xl">{activeOrb.badge}</span>
+      ) : null}
     </button>
   );
 
@@ -775,7 +765,12 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       onClick={onViewfinderClick}
       className={`viewfinder relative h-[100dvh] w-full max-w-[430px] mx-auto overflow-hidden bg-[#0A0A0A] text-white ${className}`}
     >
+      <CameraXpBar progress={(sessionXp % XP_PER_BAR) / XP_PER_BAR} />
       <LensExplorerToast toast={explorerToast} />
+      {zoomHint > 0 && mode !== 'mask' && <ZoomBadge key={zoomHint} value={zoom} />}
+      <AnimatePresence>
+        {mode === 'normal' && lensCategory === 'studio' && lensId !== 'none' && camPhase === 'ready' && models === 'ready' && !faceLocked && !recorder.isRecording && <ArFramingGuide key="frame" />}
+      </AnimatePresence>
       <MysteryBurstOverlay active={mysteryBurstActive} />
       {/* Multi-Clip Segmented Progress Bar Along Top Edge */}
       {mode !== 'mask' && (recorder.segments.length > 0 || recorder.isRecording) && (
@@ -801,7 +796,6 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
         <div aria-hidden className="pointer-events-none absolute inset-0 z-30 border-[16px] border-amber-50/95 bg-amber-50/40" />
       )}
 
-      <EmotionPeek live={mode === 'mask' ? liveEmotion : 'chill'} />
 
       <video ref={videoRef} playsInline muted autoPlay aria-hidden tabIndex={-1} className="pointer-events-none absolute left-0 top-0 size-px opacity-0" />
       <canvas
@@ -830,8 +824,8 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
           className="absolute z-20 flex items-center gap-2"
         >
           <span className="size-14 rounded-full border-2 border-white/95 shadow-[0_0_16px_rgba(255,255,255,0.6)]" />
-          <div className="flex flex-col items-center gap-1 rounded-full border border-white/90 bg-white/75 px-1.5 py-2 text-slate-900 shadow-lg backdrop-blur-xl">
-            <Sun aria-hidden className="size-3.5 text-amber-500" />
+          <div className={`flex flex-col items-center gap-1 rounded-full px-1.5 py-2 ${GLASS}`}>
+            <Sun aria-hidden className="size-3.5 text-amber-300" />
             <input
               type="range"
               min={-0.35}
@@ -840,7 +834,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
               value={exposure}
               aria-label="Exposure"
               onChange={(e) => setExposure(Number(e.target.value))}
-              className="h-20 w-1 accent-slate-900 [writing-mode:vertical-lr]"
+              className="h-20 w-1 accent-white [writing-mode:vertical-lr]"
             />
           </div>
         </div>
@@ -853,70 +847,21 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
 
       <ModeSelector activeMode={mode} onSelectMode={selectMode} disabled={recorder.isRecording || maskRecording} />
 
-      {/* Slim Right-Side Floating Frosted Acrylic Icon Rail */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="absolute right-3 top-[max(4.5rem,calc(env(safe-area-inset-top)+3.75rem))] z-20 flex flex-col items-center gap-2"
-      >
-        {flipButton}
-        <button
-          type="button"
-          onClick={() => setFlashOn((f) => !f)}
-          aria-label={flashOn ? 'Turn flash off' : 'Turn flash on'}
-          aria-pressed={flashOn}
-          className={`${frostedIconBtn} ${flashOn ? '!bg-amber-300 !text-slate-950' : ''}`}
-        >
-          {flashOn ? <Zap aria-hidden className="size-4" /> : <ZapOff aria-hidden className="size-4" />}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTimerDelay((t) => (t === 0 ? 3 : t === 3 ? 10 : 0))}
-          aria-label={`Timer: ${timerDelay || 'Off'}`}
-          className={`${frostedIconBtn} flex-col text-[9px] font-bold`}
-        >
-          <Timer aria-hidden className="size-3.5" />
-          <span>{timerDelay ? `${timerDelay}s` : 'Off'}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setSpeedRate((s) => (s === 1 ? 2 : s === 2 ? 0.5 : 1))}
-          aria-label={`Speed: ${speedRate}x`}
-          className={`${frostedIconBtn} flex-col text-[9px] font-bold`}
-        >
-          <Gauge aria-hidden className="size-3.5" />
-          <span>{speedRate}x</span>
-        </button>
-        {mode !== 'mask' && (
-          <>
-            <button
-              type="button"
-              onClick={() => setShowGrid((g) => !g)}
-              aria-label="Toggle 3x3 grid"
-              aria-pressed={showGrid}
-              className={`${frostedIconBtn} ${showGrid ? '!bg-slate-900 !text-white' : ''}`}
-            >
-              <Grid3x3 aria-hidden className="size-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setLensCategory((c) => (c === 'snap' ? 'studio' : 'snap'))}
-              aria-label="Toggle Snap AR and Studio FX"
-              aria-pressed={lensCategory === 'snap'}
-              className={`${frostedIconBtn} ${lensCategory === 'snap' ? '!bg-slate-900 !text-white' : ''}`}
-            >
-              <Wand2 aria-hidden className="size-4" />
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          onClick={() => setDurationLimit((d) => (d === 15 ? 30 : d === 30 ? 60 : 15))}
-          aria-label={`Duration limit: ${durationLimit}s`}
-          className={`${frostedIconBtn} text-[10px] font-extrabold`}
-        >
-          {durationLimit}s
-        </button>
-      </div>
+      <CameraTopRail
+        flipButton={flipButton}
+        flashOn={flashOn}
+        onToggleFlash={() => setFlashOn((f) => !f)}
+        open={moreOpen}
+        onOpenChange={setMoreOpen}
+        timerDelay={timerDelay}
+        onCycleTimer={() => setTimerDelay((t) => (t === 0 ? 3 : t === 3 ? 10 : 0))}
+        speedRate={speedRate}
+        onCycleSpeed={() => setSpeedRate((v) => (v === 1 ? 2 : v === 2 ? 0.5 : 1))}
+        durationLimit={durationLimit}
+        onCycleDuration={() => setDurationLimit((d) => (d === 15 ? 30 : d === 30 ? 60 : 15))}
+        showGrid={mode === 'mask' ? null : showGrid}
+        onToggleGrid={() => setShowGrid((g) => !g)}
+      />
 
       {/* Big Animated Countdown Overlay */}
       {countdown !== null && (
@@ -926,49 +871,28 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       )}
 
       {/* Light-Theme Frosted Recovery Card (Never a Dead Black Screen) */}
-      {camPhase === 'requesting' && <Overlay icon={<LoaderCircle aria-hidden className="size-8 animate-spin text-slate-800" />} title="Starting camera…" body="Allow camera and microphone access when asked." />}
-      {camPhase === 'ready' && mode !== 'mask' && mode !== 'normal' && models === 'loading' && <Overlay icon={<LoaderCircle aria-hidden className="size-8 animate-spin text-slate-800" />} title="Loading privacy shield…" body="Preparing on-device face protection." />}
-      {camPhase === 'ready' && mode !== 'mask' && mode !== 'normal' && models === 'error' && <Overlay icon={<CameraOff aria-hidden className="size-8 text-slate-800" />} title="Privacy shield failed to load" body="Recording is locked in this mode until models load." action={<Action onClick={retryModels}>Try again</Action>} />}
+      {camPhase === 'requesting' && <Overlay mood="chill" busy title="Waking the camera…" />}
+      {camPhase === 'ready' && mode !== 'mask' && mode !== 'normal' && models === 'loading' && <Overlay mood="surprised" busy title="Loading privacy shield…" />}
+      {camPhase === 'ready' && mode !== 'mask' && mode !== 'normal' && models === 'error' && (
+        <Overlay mood="sad" title="Privacy shield didn’t load" body="This mode stays locked until it does." action={<Action onClick={retryModels}><RotateCcw aria-hidden className="size-4" />Retry</Action>} />
+      )}
       {(camPhase === 'denied' || camPhase === 'unsupported' || camPhase === 'error') && (
         <Overlay
-          icon={<CameraOff aria-hidden className="size-8 text-slate-800" />}
-          title={camPhase === 'denied' ? 'Camera or mic permission blocked' : camPhase === 'unsupported' ? 'Camera requires HTTPS' : 'Camera is busy or unavailable'}
-          body="Pick another camera below, or switch to Audio + 3D Avatar mode with zero webcam required."
+          mood="sad"
+          title={camPhase === 'denied' ? 'Camera blocked' : camPhase === 'unsupported' ? 'Camera needs HTTPS' : 'Camera is busy'}
+          body={camPhase === 'denied' ? 'Allow camera access, or go faceless with your avatar.' : 'Pick a camera, or go faceless with your avatar.'}
           action={
             <div className="flex w-full flex-col items-center gap-2.5">
-              {devices.length > 0 && (
-                <select
-                  aria-label="Choose camera device"
-                  value={selectedDeviceId ?? ''}
-                  onChange={(e) => void selectDevice(e.target.value)}
-                  className="min-h-10 w-full rounded-full border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-900"
-                >
-                  <option value="">Select camera device…</option>
-                  {devices.map((d, i) => (
-                    <option key={d.deviceId} value={d.deviceId}>
-                      {d.label || `Camera ${i + 1}`}
-                    </option>
-                  ))}
-                </select>
-              )}
+              <CameraDeviceToggle devices={devices} selectedId={selectedDeviceId ?? null} onSelect={(id) => void selectDevice(id)} />
               <div className="flex w-full gap-2">
-                <button
-                  type="button"
-                  onClick={() => void retryCamera()}
-                  className="min-h-11 flex-1 rounded-full border border-slate-300 bg-white px-4 text-xs font-bold text-slate-900"
-                >
-                  Retry
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('mask');
-                    void startAudioOnly();
-                  }}
-                  className="min-h-11 flex-1 rounded-full bg-slate-900 px-4 text-xs font-bold text-white shadow"
-                >
-                  Audio + 3D Avatar
-                </button>
+                <motion.button type="button" whileTap={{ scale: 0.92 }} onClick={() => void retryCamera()} aria-label="Retry camera"
+                  className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full border border-white/20 bg-white/10 text-xs font-bold">
+                  <RotateCcw aria-hidden className="size-4" />Retry
+                </motion.button>
+                <motion.button type="button" whileTap={{ scale: 0.92 }} onClick={() => { setMode('mask'); void startAudioOnly(); }} aria-label="Use Audio + 3D Avatar mode"
+                  className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-white text-xs font-bold text-slate-950">
+                  <VenetianMask aria-hidden className="size-4" />Avatar
+                </motion.button>
               </div>
             </div>
           }
@@ -977,7 +901,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
 
       {mode === 'mask' && camNotice && (
         <div className="absolute inset-x-0 top-24 z-10 flex flex-col items-center gap-2 px-4">
-          <p role="alert" className="rounded-full border border-white/90 bg-white/80 px-3 py-1 text-xs font-semibold text-slate-900 shadow backdrop-blur-xl">{camNotice}</p>
+          <p role="alert" className={`rounded-full px-3 py-1 text-xs font-semibold ${GLASS}`}>{camNotice}</p>
         </div>
       )}
 
@@ -1014,7 +938,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       {mode !== 'mask' && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2.5 bg-gradient-to-t from-black/75 via-black/30 to-transparent px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-14"
+          className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-1.5 bg-gradient-to-t from-black/55 via-black/15 to-transparent pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-10"
         >
           {mode === 'noface' && faceLocked && camPhase === 'ready' && (
             <p role="status" className="flex items-center gap-2 rounded-full border border-rose-300 bg-rose-500/90 px-3 py-1.5 text-xs font-bold text-white shadow backdrop-blur-xl">
@@ -1022,93 +946,39 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
             </p>
           )}
           {(recorder.isRecording || recorder.segments.length > 0) && (
-            <p role="timer" aria-label="Recording time" className="flex items-center gap-2 rounded-full border border-white/90 bg-white/80 px-3 py-1 text-xs font-bold tabular-nums text-slate-900 shadow backdrop-blur-xl">
+            <p role="timer" aria-label="Recording time" className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold tabular-nums ${GLASS}`}>
               <span aria-hidden className={`size-2 rounded-full ${recorder.isRecording ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
               {formatTime(recorder.recordingSeconds)} / {formatTime(durationLimit)}
-              {handsFreeLocked && <span className="ml-1 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] text-white">🔒 LOCKED</span>}
+              {handsFreeLocked && <span className="ml-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px]">🔒 Locked</span>}
             </p>
           )}
           {(recorder.error || camNotice) && (
-            <p role="alert" className="rounded-full border border-white/90 bg-white/85 px-3 py-1 text-xs font-semibold text-slate-900 shadow backdrop-blur-xl">
+            <p role="alert" className={`rounded-full px-3 py-1 text-xs font-semibold ${GLASS}`}>
               {recorder.error ?? camNotice}
             </p>
           )}
 
-          {/* Compact 0.5x / 1x / 2x Frosted Zoom Pills */}
-          <div className="flex items-center gap-1 rounded-full border border-white/90 bg-white/75 p-1 text-slate-900 shadow backdrop-blur-xl">
-            {[0.5, 1, 2].map((z) => (
-              <button
-                key={z}
-                type="button"
-                onClick={() => setZoom(z)}
-                className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold transition ${
-                  Math.abs(zoom - z) < 0.2 ? 'bg-slate-900 text-white' : 'text-slate-700'
-                }`}
-              >
-                {z}x
+          <input ref={galleryInputRef} type="file" accept="video/*,image/*" onChange={handleGalleryPick} className="hidden" />
+          {recorder.segments.length > 0 && !recorder.isRecording && (
+            <div className="flex w-full items-center justify-between px-6">
+              <button type="button" onClick={recorder.undoLastSegment} aria-label="Undo last clip" className={glassIconBtn}>
+                <RotateCcw aria-hidden className="size-4" />
               </button>
-            ))}
-          </div>
+              <button type="button" onClick={recorder.finishMultiClip} aria-label="Finish and preview clip" className={`flex h-10 items-center gap-1.5 rounded-full px-4 text-xs font-bold ${GLASS}`}>
+                <Check aria-hidden className="size-4" /> Done
+              </button>
+            </div>
+          )}
 
-          {/* Shutter-Integrated Snapchat-Style Lens Carousel */}
-          <LensCarousel
+          <LensCarousel items={activeCarouselItems} activeId={activeCarouselId} onSelect={handleSelectCarouselOrb} shutterButton={shutterButtonNode} />
+
+          <CameraCategoryStrip
             category={lensCategory}
             onCategoryChange={setLensCategory}
+            onGallery={() => galleryInputRef.current?.click()}
             snapCount={snapLenses.length}
             studioCount={studioItems.length}
-            items={activeCarouselItems}
-            activeId={activeCarouselId}
-            onSelect={handleSelectCarouselOrb}
-            shutterButton={shutterButtonNode}
           />
-
-          {/* Compact Bottom Action Row: Gallery Import | Undo | Finish Multi-Clip / Category Quick Toggle */}
-          <div className="flex w-full items-center justify-between px-4">
-            <div className="flex items-center gap-2">
-              <input ref={galleryInputRef} type="file" accept="video/*,image/*" onChange={handleGalleryPick} className="hidden" />
-              <button
-                type="button"
-                onClick={() => galleryInputRef.current?.click()}
-                aria-label="Import from gallery"
-                className="flex size-10 items-center justify-center rounded-2xl border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
-              >
-                <ImagePlus aria-hidden className="size-4" />
-              </button>
-              {recorder.segments.length > 0 && !recorder.isRecording && (
-                <button
-                  type="button"
-                  onClick={recorder.undoLastSegment}
-                  aria-label="Undo last clip"
-                  className="flex size-10 items-center justify-center rounded-full border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
-                >
-                  <RotateCcw aria-hidden className="size-4" />
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              {recorder.segments.length > 0 && !recorder.isRecording ? (
-                <button
-                  type="button"
-                  onClick={recorder.finishMultiClip}
-                  aria-label="Finish and preview clip"
-                  className="flex h-10 items-center gap-1.5 rounded-full bg-slate-900 px-4 text-xs font-extrabold text-white shadow-lg"
-                >
-                  <Check aria-hidden className="size-4" />
-                  <span>Done</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setLensCategory((c) => (c === 'snap' ? 'studio' : 'snap'))}
-                  aria-label="Switch Snap AR and Studio FX"
-                  className="flex size-10 items-center justify-center rounded-full border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
-                >
-                  <Sparkles aria-hidden className="size-4" />
-                </button>
-              )}
-            </div>
-          </div>
         </div>
       )}
 
@@ -1129,45 +999,28 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   );
 }
 
-function Overlay({ icon, title, body, action }: { icon: React.ReactNode; title: string; body: string; action?: React.ReactNode }) {
+/** Status card: an animated clay character instead of a stock icon, one short line, and icon actions. */
+function Overlay({ mood, busy = false, title, body, action }: { mood: EmotionTag; busy?: boolean; title: string; body?: string; action?: React.ReactNode }) {
+  const reduce = useReducedMotion();
   return (
-    <div role="status" className="absolute inset-0 z-[15] flex items-center justify-center bg-slate-900/45 px-6 backdrop-blur-md">
-      <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-[28px] border border-white/95 bg-white/90 p-6 text-center text-slate-900 shadow-2xl backdrop-blur-2xl">
-        {icon}
-        <h2 className="text-base font-bold">{title}</h2>
-        <p className="text-xs text-slate-600">{body}</p>
+    <div role="status" onClick={(e) => e.stopPropagation()} className="absolute inset-0 z-[15] flex items-center justify-center bg-black/45 px-6 backdrop-blur-md">
+      <motion.div initial={{ opacity: 0, y: 16, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: 'spring', stiffness: 300, damping: 26 }}
+        className={`flex w-full max-w-xs flex-col items-center gap-3 rounded-[28px] p-5 text-center ${GLASS}`}>
+        <motion.span animate={reduce ? undefined : { y: [0, -6, 0], rotate: busy ? [0, 8, -8, 0] : [0, -4, 4, 0] }} transition={{ duration: busy ? 1.4 : 2.6, repeat: Infinity, ease: 'easeInOut' }}>
+          <ClayEmotionOrb emotion={mood} size={72} />
+        </motion.span>
+        <h2 className="text-[15px] font-bold tracking-tight">{title}</h2>
+        {body && <p className="text-xs text-white/65">{body}</p>}
         {action}
-      </div>
+      </motion.div>
     </div>
   );
 }
 
 function Action({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" onClick={onClick} className="min-h-11 rounded-full bg-slate-900 px-5 text-xs font-bold text-white shadow">
+    <motion.button type="button" onClick={onClick} whileTap={{ scale: 0.92 }} className="flex min-h-11 items-center gap-1.5 rounded-full bg-white px-5 text-xs font-bold text-slate-950 shadow">
       {children}
-    </button>
-  );
-}
-
-const PEEK_COMPANIONS: Record<EmotionTag, [EmotionTag, EmotionTag]> = {
-  joy: ['surprised', 'chill'],
-  angry: ['sad', 'chill'],
-  surprised: ['joy', 'chill'],
-  sad: ['chill', 'angry'],
-  chill: ['joy', 'surprised'],
-};
-
-function EmotionPeek({ live }: { live: EmotionTag }) {
-  const reduce = useReducedMotion();
-  const [left, right] = PEEK_COMPANIONS[live];
-  return (
-    <div aria-hidden className="pointer-events-none absolute left-1/2 top-0 z-20 flex -translate-x-1/2 -translate-y-1/2 items-end gap-2">
-      <ClayEmotionOrb emotion={left} size={28} className="emotion-peek opacity-80" />
-      <motion.span key={live} initial={reduce ? false : { scale: 0.6 }} animate={reduce ? undefined : { scale: [1, 1.12, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}>
-        <ClayEmotionOrb emotion={live} size={42} />
-      </motion.span>
-      <ClayEmotionOrb emotion={right} size={24} className="emotion-peek opacity-80 [animation-delay:300ms]" />
-    </div>
+    </motion.button>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { CameraOff, LoaderCircle, Square } from 'lucide-react';
+import { CameraOff, Lightbulb, LoaderCircle, Square } from 'lucide-react';
 import type { HandLandmarkerResult, PoseLandmarkerResult } from '@mediapipe/tasks-vision';
 import { AvatarSelector } from '@/components/AvatarSelector';
 import { VoiceWaveform } from '@/components/VoiceWaveform';
@@ -296,7 +296,7 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
         {error && <p role="alert" className="rounded-full bg-black/60 px-3 py-1 text-xs text-white/90">{error}</p>}
         {!audioStream && models === 'ready' && <p role="status" className="rounded-full bg-black/60 px-3 py-1 text-xs text-white/90">Waiting for the microphone…</p>}
 
-        <div className="flex items-center gap-2 text-white/80"><PrismaticLiquidBlob state={recording ? 'active' : 'idle'} size="sm" /><VoiceWaveform stream={audioStream} active={recording} /><button type="button" onClick={() => setShowPrompts((show) => !show)} aria-pressed={showPrompts} className="acrylic-pill min-h-9 px-3 text-xs font-semibold">{showPrompts ? 'Hide prompts' : 'Guided prompts'}</button></div>
+        <div className="flex items-center gap-2 text-white/80"><PrismaticLiquidBlob state={recording ? 'active' : 'idle'} size="sm" /><VoiceWaveform stream={audioStream} active={recording} /><button type="button" onClick={() => setShowPrompts((show) => !show)} aria-pressed={showPrompts} aria-label={showPrompts ? 'Hide guided prompts' : 'Show guided prompts'} className={`flex size-9 items-center justify-center rounded-full border border-white/15 backdrop-blur-xl transition-colors ${showPrompts ? 'bg-white text-slate-950' : 'bg-black/30 text-white'}`}><Lightbulb aria-hidden className="size-4" /></button></div>
 
         <div className="flex w-full items-center justify-between">
           <div className="flex size-12 items-center justify-center">{leading}</div>

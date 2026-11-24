@@ -39,6 +39,7 @@ export function useLensGamification() {
   });
 
   const [sessionCount, setSessionCount] = useState(0);
+  const [sessionXp, setSessionXp] = useState(0);
   const [toast, setToast] = useState<LensExplorerToastData | null>(null);
   const [mysteryBurstActive, setMysteryBurstActive] = useState(false);
 
@@ -48,12 +49,11 @@ export function useLensGamification() {
   const syncXpToBackend = useCallback(async (xp: number) => {
     if (isDemoMode || xp <= 0) return;
     try {
-      const token = await ensureSession();
-      if (!token) return;
+      const session = await ensureSession();
       await fetch('/api/feed/xp', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ xp }),
@@ -67,7 +67,7 @@ export function useLensGamification() {
   const showToast = useCallback((title: string, xp: number) => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
     setToast({ id: Date.now(), title, xp });
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 2200);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 1800);
   }, []);
 
   useEffect(() => {
@@ -99,7 +99,7 @@ export function useLensGamification() {
         setSessionCount(count);
         if (count === 3) {
           awardedXp += 25;
-          showToast('Lens Explorer (3/3)', 25);
+          showToast('Lens Explorer', 25);
         } else if (awardedXp > 0) {
           showToast('New Lens Discovered', awardedXp);
         }
@@ -108,6 +108,7 @@ export function useLensGamification() {
       }
 
       if (awardedXp > 0) {
+        setSessionXp((v) => v + awardedXp);
         void syncXpToBackend(awardedXp);
       }
     },
@@ -122,7 +123,7 @@ export function useLensGamification() {
       const picked = candidates[Math.floor(Math.random() * candidates.length)];
 
       setMysteryBurstActive(true);
-      window.setTimeout(() => setMysteryBurstActive(false), 550);
+      window.setTimeout(() => setMysteryBurstActive(false), 400);
 
       if (!mysteryUsedToday) {
         setMysteryUsedToday(true);
@@ -132,9 +133,11 @@ export function useLensGamification() {
           // ignore
         }
         showToast('Daily Mystery Lens', 20);
+        setSessionXp((v) => v + 20);
         void syncXpToBackend(20);
       } else {
         showToast('Mystery Shuffle', 5);
+        setSessionXp((v) => v + 5);
         void syncXpToBackend(5);
       }
 
@@ -147,6 +150,7 @@ export function useLensGamification() {
     exploredIds,
     mysteryUsedToday,
     sessionCount,
+    sessionXp,
     toast,
     mysteryBurstActive,
     recordLensTry,
@@ -165,12 +169,11 @@ export function LensExplorerToast({ toast }: { toast: LensExplorerToastData | nu
           exit={{ opacity: 0, y: -12, scale: 0.96 }}
           transition={{ type: 'spring', stiffness: 420, damping: 28 }}
           role="status"
-          className="pointer-events-none absolute left-1/2 top-[max(4.4rem,calc(env(safe-area-inset-top)+3.6rem))] z-30 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-white/95 bg-white/85 px-3.5 py-1.5 text-xs font-extrabold text-slate-900 shadow-lg backdrop-blur-xl"
+          className="pointer-events-none absolute left-1/2 top-[calc(max(0.75rem,env(safe-area-inset-top))+3.25rem)] z-30 flex -translate-x-1/2 items-center gap-1.5 whitespace-nowrap rounded-full border border-white/15 bg-black/30 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm backdrop-blur-xl"
         >
           <span>✨ {toast.title}</span>
-          <span className="rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-2 py-0.5 text-[10px] font-black text-white">
-            +{toast.xp} XP
-          </span>
+          <span className="text-white/60">•</span>
+          <span className="font-bold text-cyan-200">+{toast.xp} XP</span>
         </motion.div>
       )}
     </AnimatePresence>
@@ -183,11 +186,11 @@ export function MysteryBurstOverlay({ active }: { active: boolean }) {
       {active && (
         <motion.div
           initial={{ opacity: 0, scale: 0.7 }}
-          animate={{ opacity: [0, 0.95, 0], scale: [0.7, 1.25, 1.45] }}
+          animate={{ opacity: [0, 0.9, 0], scale: [0.7, 1.2, 1.4] }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.5, ease: 'easeOut' }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
           aria-hidden
-          className="pointer-events-none absolute inset-0 z-25 bg-[radial-gradient(circle_at_center,rgba(244,114,182,0.45),rgba(139,92,246,0.28),transparent_70%)]"
+          className="pointer-events-none absolute inset-0 z-[25] bg-[radial-gradient(circle_at_50%_85%,rgba(255,255,255,0.55),rgba(165,243,252,0.3)_25%,rgba(196,181,253,0.22)_45%,transparent_70%)] backdrop-blur-[2px]"
         />
       )}
     </AnimatePresence>
