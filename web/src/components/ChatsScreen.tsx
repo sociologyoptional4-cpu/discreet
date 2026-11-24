@@ -108,6 +108,7 @@ function ChatRow({ chat: c, index }: { chat: ConversationItem; index: number }) 
 
 /** Never a dry "no chats" line: floating emoji, creators to wave at, and a nudge to post a story. */
 function EmptyVibe({ exclude, onPostStory }: { exclude: string[]; onPostStory: () => void }) {
+  const router = useRouter();
   const [creators, setCreators] = useState<SuggestedCreator[] | null>(null);
   const [sent, setSent] = useState<Record<string, 'sending' | 'sent' | 'error'>>({});
   const excludeKey = exclude.join(',');
@@ -126,8 +127,9 @@ function EmptyVibe({ exclude, onPostStory }: { exclude: string[]; onPostStory: (
     try {
       const viewer = await currentUserId();
       if (!viewer) throw new Error('No session');
-      await requestConversation(viewer, creator.id, 'Wave 👋');
+      const convId = await requestConversation(viewer, creator.id, 'Wave 👋');
       setSent((s) => ({ ...s, [creator.id]: 'sent' }));
+      router.push(`/chats/${convId}`);
     } catch {
       setSent((s) => ({ ...s, [creator.id]: 'error' }));
     }

@@ -1,5 +1,5 @@
 'use client';
-import { motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Play, Share2, Volume2, VolumeX } from 'lucide-react';
@@ -10,6 +10,7 @@ import { FeedReactionDock, type FeedTag, type FeedToast } from '@/components/fee
 import type { SocialActions } from '@/hooks/useSocialActions';
 import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
+import { playCue } from '@/lib/chat/spatialAudio';
 import type { FeedItem } from '@/types/social';
 
 export type FeedCardProps = {
@@ -55,6 +56,7 @@ export function FeedCard(props: FeedCardProps) {
   const missingMedia = !item.media_url || failedUrl === item.media_url;
   const fallback = item.transcript || item.ai_summary || 'Media unavailable';
   const [likeBurst, setLikeBurst] = useState(0);
+  const [tapHeart, setTapHeart] = useState<{ id: number; x: number; y: number } | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [toasts, setToasts] = useState<FeedToast[]>([]);
   const toastSeq = useRef(0);
@@ -70,6 +72,14 @@ export function FeedCard(props: FeedCardProps) {
     setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), TOAST_MS);
   };
   const react = (emoji: string, x: number, y: number) => {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try {
+        navigator.vibrate(emoji === HEART ? [16, 26, 20] : 12);
+      } catch {
+        // ignore
+      }
+    }
+    playCue(emoji === HEART ? 'heart_burst' : 'sticker_send', 0);
     if (emoji === HEART) {
       void social.toggleLike(item.id, like.liked);
       if (like.liked) return; // unliking is not a reaction
@@ -80,9 +90,25 @@ export function FeedCard(props: FeedCardProps) {
     toast(emoji);
     onReact(emoji, x, y);
   };
-  const doubleTapLike = (event: MouseEvent) => {
+  const doubleTapLike = (event: MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
-    if (!like.liked) react(HEART, event.clientX, event.clientY);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const id = ++toastSeq.current;
+    setTapHeart({ id, x: event.clientX - rect.left, y: event.clientY - rect.top });
+    window.setTimeout(() => setTapHeart((h) => (h?.id === id ? null : h)), 850);
+    if (!like.liked) {
+      react(HEART, event.clientX, event.clientY);
+    } else {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        try {
+          navigator.vibrate([16, 26, 20]);
+        } catch {
+          // ignore
+        }
+      }
+      playCue('heart_burst', 0);
+      onReact(HEART, event.clientX, event.clientY);
+    }
   };
   const open = (event: KeyboardEvent) => {
     if (event.shiftKey && event.key === 'F10') { event.preventDefault(); props.onNotInterested(); return; }
@@ -117,6 +143,25 @@ export function FeedCard(props: FeedCardProps) {
       aria-label={`Post ${item.topic_entity ? `about ${item.topic_entity}` : ''} by ${name}`}
     >
       <SwipeBubbleOverlay trigger={likeBurst} kind="like" />
+      <AnimatePresence>
+        {tapHeart && (
+          <motion.div
+            key={tapHeart.id}
+            initial={{ opacity: 0, scale: 0.2, rotate: -14, y: 0 }}
+            animate={{ opacity: [0, 1, 1, 0], scale: [0.2, 1.38, 1.1, 0.95], rotate: [-14, 10, -4, 0], y: -64 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.78, ease: 'easeOut' }}
+            style={{ left: tapHeart.x - 42, top: tapHeart.y - 42 }}
+            aria-hidden
+            className="pointer-events-none absolute z-40 flex flex-col items-center"
+          >
+            <Emoji3D emoji="💖" size={84} />
+            <span className="-mt-1 rounded-full bg-gradient-to-r from-rose-500 to-violet-500 px-2.5 py-0.5 text-[11px] font-black text-white shadow-lg">
+              +10 VIBE XP ⚡
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div data-mask-slot className="absolute inset-0">
         {item.mode === 'mask' ? (
           active ? null : (

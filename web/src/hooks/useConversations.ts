@@ -1,11 +1,17 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { acceptConversation, declineConversation, fetchConversations } from '@/lib/chatData';
+import { acceptConversation, declineConversation, fetchConversations, requestConversation } from '@/lib/chatData';
 import { splitConversations, type ConversationItem } from '@/lib/conversations';
 import { currentUserId } from '@/lib/session';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { safeRandomUUID } from '@/lib/uuid';
 
 const REFRESH_DELAY_MS = 250;
+const DEFAULT_AI_SCOUTS = [
+  '11111111-1111-4111-8111-111111111201',
+  '11111111-1111-4111-8111-111111111202',
+  '11111111-1111-4111-8111-111111111203',
+] as const;
 
 export type Conversations = {
   /** Requests other people sent, waiting for an answer. */
@@ -27,11 +33,20 @@ export function useConversations(): Conversations {
   const aliveRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const seededRef = useRef(false);
+
   const reload = useCallback(async () => {
     const viewer = viewerRef.current;
     if (!viewer) return;
     try {
-      const next = await fetchConversations(viewer);
+      let next = await fetchConversations(viewer);
+      if (next.length === 0 && !seededRef.current) {
+        seededRef.current = true;
+        await Promise.all(
+          DEFAULT_AI_SCOUTS.map((scoutId) => requestConversation(viewer, scoutId, 'Wave 👋').catch(() => null))
+        );
+        next = await fetchConversations(viewer);
+      }
       if (aliveRef.current) { setItems(next); setError(null); }
     } catch (e) {
       if (aliveRef.current) setError(e instanceof Error ? e.message : 'Could not load your chats.');
@@ -50,7 +65,7 @@ export function useConversations(): Conversations {
         await reload();
         if (cancelled) return;
         channel = supabase
-          .channel(`inbox:${viewer}:${crypto.randomUUID().slice(0, 8)}`)
+          .channel(`inbox:${viewer}:${safeRandomUUID().slice(0, 8)}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
             if (cancelled) return;
             if (timerRef.current) clearTimeout(timerRef.current);

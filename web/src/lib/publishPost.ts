@@ -2,6 +2,7 @@ import { describeMedia, uploadMedia, type MediaInput } from '@/lib/r2Upload';
 import { demoAddPost } from '@/lib/demoData';
 import { ensureSession } from '@/lib/session';
 import { isDemoMode, supabase } from '@/lib/supabase';
+import { safeRandomUUID } from '@/lib/uuid';
 import type { ExpiryTier } from '@/types/privacy';
 
 export type PublishInput = MediaInput & { expiryTier: ExpiryTier; isIncog: boolean; topic?: string | null };
@@ -42,7 +43,7 @@ export async function publishPost(input: PublishInput, onProgress?: ProgressHand
   const uploaded = await uploadMedia(token, input, expiryTier, (fraction) => onProgress?.(fraction * UPLOAD_SHARE));
   const { mode, avatarId, durationSec } = describeMedia(input);
 
-  const postId = crypto.randomUUID();
+  const postId = safeRandomUUID();
   const { error } = await supabase.from('posts').insert({
     id: postId,
     user_id: session.user.id,

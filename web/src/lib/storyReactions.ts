@@ -1,6 +1,7 @@
 import { flushOutbox, storeOutgoing } from '@/lib/offlineQueue';
 import { ensureSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
+import { safeRandomUUID } from '@/lib/uuid';
 
 export const STORY_REACTIONS = ['🔥', '😂', '❤️', '😮'] as const;
 export type StoryReaction = (typeof STORY_REACTIONS)[number];
@@ -28,7 +29,7 @@ export async function sendStoryReaction(creatorId: string, storyId: string, reac
   const {data: conversation,error: lookupError} = await supabase.from('conversations').select('status,initiator_id').eq('id',id).single();
   if (lookupError || !conversation) throw new Error('Could not open this conversation.');
   if (conversation.status !== 'accepted') return conversation.initiator_id === viewerId ? 'requested' : 'waiting';
-  const clientId = crypto.randomUUID();
+  const clientId = safeRandomUUID();
   await storeOutgoing({row:{
     id:clientId, client_msg_id:clientId, conversation_id:id, sender_id:viewerId, type:'story_reply', content,
     story_id:storyId, snap_mode:null, avatar_id:null, media_url:null, motion_url:null, viewed_at:null,

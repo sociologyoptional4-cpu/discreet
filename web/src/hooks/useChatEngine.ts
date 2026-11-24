@@ -5,6 +5,7 @@ import { flushOutbox, MESSAGE_COLUMNS, observeOutbox, queuedFor, retryOutgoing, 
 import { describeMedia, toMediaInput, type MediaInput } from '@/lib/r2Upload';
 import { ensureSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
+import { safeRandomUUID } from '@/lib/uuid';
 import type { MaskRecordingPayload } from '@/types/avatar';
 import type { ChatMeta, Outgoing, Retention, SnapView, StreakStatus } from '@/types/chat';
 import type { RecordedSnapPayload } from '@/types/privacy';
@@ -72,7 +73,7 @@ export function useChatEngine(conversationId: string, currentUserId: string) {
   useEffect(() => {
     let alive = true;
     mounted.current = true;
-    sessionId.current = crypto.randomUUID();
+    sessionId.current = safeRandomUUID();
     const replaySet = replayable.current;
     const receiptSet = receiptRequests.current;
     const owned = previews.current;
@@ -175,7 +176,7 @@ export function useChatEngine(conversationId: string, currentUserId: string) {
   };
 
   const send = async (type: MessageRow['type'], content: string | null, input?: MediaInput) => {
-    const id = crypto.randomUUID();
+    const id = safeRandomUUID();
     const description = input && describeMedia(input);
     const row: MessageRow = {
       id, client_msg_id: id, sender_id: currentUserId, conversation_id: conversationId, type, content,

@@ -22,6 +22,7 @@ import { findConversationWith } from '@/lib/chatData';
 import { setImmersive } from '@/lib/immersive';
 import { ensureSession } from '@/lib/session';
 import { handleShare } from '@/lib/share';
+import { playCue, primeAudio } from '@/lib/chat/spatialAudio';
 import type { FeedItem } from '@/types/social';
 
 const ACTIVE_RATIO = 0.6;
@@ -120,11 +121,29 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
       setSwipe({ id: `${activeId}-${now}`, direction: activeIndex > previousIndex.current ? 'up' : 'down' });
       setPulse(now);
       setPickerOpen(false);
+      // Soft haptic vibration + subtle tactile audio cue on every card swipe
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        try {
+          navigator.vibrate(15);
+        } catch {
+          // ignore
+        }
+      }
+      playCue('swipe_tick', 0);
       // Each post earns XP once, so scrolling back and forth (or a scroll that flickers between two cards) can't farm it.
       if (!watched.current.has(activeId)) {
         watched.current.add(activeId);
         setXp((v) => v + XP.watch);
-        if (watched.current.size % WATCH_MILESTONE === 0) celebrate('🔥', `${watched.current.size}x Vibe Streak`);
+        if (watched.current.size % WATCH_MILESTONE === 0) {
+          if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            try {
+              navigator.vibrate([20, 35, 25]);
+            } catch {
+              // ignore
+            }
+          }
+          celebrate('🔥', `${watched.current.size}x Vibe Streak`);
+        }
       }
       const target = !nudged.current && watched.current.size >= NUDGE_AFTER ? followedAhead(items, activeIndex) : undefined;
       if (target) {
@@ -216,7 +235,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   };
 
   return (
-    <div className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-black text-white">
+    <div onPointerDownCapture={primeAudio} onTouchStartCapture={primeAudio} className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-black text-white">
       {maskHost && active?.mode === 'mask' && createPortal(
         <>
           <MaskPlayback avatarId={styleFor(active)} motionUrl={active.motion_url} audioUrl={active.media_url} soundOn={soundOn} paused={pausedId === active.id} barRef={maskBar}
@@ -237,7 +256,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
           style={{ scrollSnapType: 'y mandatory', paddingBlock: PEEK_PX }}
         >
           {items.map((item, index) => {
-            const near = Math.abs(index - activeIndex) <= 1;
+            const near = index >= activeIndex - 1 && index <= activeIndex + 2;
             return (
             <article
               key={item.id}
@@ -250,7 +269,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
               className="relative w-full snap-center snap-always"
               style={{ height: `calc(100dvh - ${PEEK_PX * 2}px)`, marginBottom: GAP_PX }}
             >
-              <LiquidWarpCard axis="vertical" className="absolute inset-0" container={scrollerRef} disabled>
+              <LiquidWarpCard axis="vertical" className="absolute inset-0" container={scrollerRef} disabled={item.id === expandedId}>
               <FeedCard
                 item={item}
                 active={item.id === activeId}

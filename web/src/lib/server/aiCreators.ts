@@ -44,20 +44,13 @@ export const AI_CREATOR_AGENTS: readonly AiCreatorProfile[] = [
 ];
 
 export const VERIFIED_DEMO_VIDEOS: readonly string[] = [
-  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4',
-  'https://media.w3.org/2010/05/sintel/trailer.mp4',
-  'https://media.w3.org/2010/05/bunny/trailer.mp4',
-  'https://media.w3.org/2010/05/video/movie_300.mp4',
-  'https://vjs.zencdn.net/v/oceans.mp4',
-  'https://www.w3schools.com/html/mov_bbb.mp4',
-  'https://www.w3schools.com/tags/movie.mp4',
-  'https://download.samplelib.com/mp4/sample-5s.mp4',
-  'https://download.samplelib.com/mp4/sample-10s.mp4',
-  'https://download.samplelib.com/mp4/sample-15s.mp4',
-  'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4',
-  'https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4',
-  'https://test-videos.co.uk/vids/sintel/mp4/h264/720/Sintel_720_10s_1MB.mp4',
+  'https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/demo/fast-clip-1.mp4',
+  'https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/demo/fast-clip-2.mp4',
+  'https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/demo/fast-clip-3.mp4',
+  'https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/demo/fast-clip-4.mp4',
+  'https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/demo/fast-clip-5.mp4',
+  'https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/demo/fast-clip-6.mp4',
+  'https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/demo/fast-clip-7.mp4',
 ];
 
 type CuratedSeed = {

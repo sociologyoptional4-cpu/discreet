@@ -1,6 +1,6 @@
 /** Tiny Web Audio synth with stereo panning. Silent until `primeAudio()` runs inside a user gesture. */
 
-export type AudioCue = 'poke_knock' | 'heart_burst' | 'sticker_send';
+export type AudioCue = 'poke_knock' | 'heart_burst' | 'sticker_send' | 'swipe_tick';
 
 let context: AudioContext | null = null;
 
@@ -40,6 +40,8 @@ export function playCue(cue: AudioCue, pan = 0): void {
     tone(ctx, panner, { freq: 1700, to: 600, type: 'triangle', start: t + 0.13, length: 0.09, gain: 0.18 });
   } else if (cue === 'heart_burst') {
     [523.25, 659.25, 783.99].forEach((f, i) => tone(ctx, panner, { freq: f, to: f * 1.01, type: 'sine', start: t + i * 0.07, length: 0.5, gain: 0.12 }));
+  } else if (cue === 'swipe_tick') {
+    tone(ctx, panner, { freq: 210, to: 95, type: 'sine', start: t, length: 0.045, gain: 0.08 });
   } else {
     tone(ctx, panner, { freq: 320, to: 980, type: 'sine', start: t, length: 0.12, gain: 0.16 });
   }

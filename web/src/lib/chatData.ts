@@ -1,5 +1,7 @@
 import { toConversationItem, type ConversationItem, type ConversationRow } from '@/lib/conversations';
+import { ensureSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
+import { safeRandomUUID } from '@/lib/uuid';
 
 const COLUMNS =
   'id, user_a, user_b, status, initiator_id, request_note, last_message_at, user_a_unread, user_b_unread, streak_count, streak_updated_at, a:users!user_a(id, username, avatar_id), b:users!user_b(id, username, avatar_id)';
@@ -34,10 +36,37 @@ export async function findConversationWith(viewerId: string, otherId: string): P
   return data ? { id: data.id as string, status: data.status as 'pending' | 'accepted', initiatorId: data.initiator_id as string } : null;
 }
 
-/** Starts a pending request with a reason. Returns the new conversation's id; a request that already exists counts as done. */
+/** Starts a conversation request; AI & demo creators auto-accept immediately via /api/chats/start so chat opens right away. */
 export async function requestConversation(viewerId: string, otherId: string, note: string): Promise<string> {
-  const id = crypto.randomUUID();
-  const { error } = await supabase.from('conversations').insert({ id, user_a: viewerId, user_b: otherId, initiator_id: viewerId, request_note: note.trim().slice(0, REQUEST_NOTE_MAX) });
+  try {
+    const session = await ensureSession();
+    const res = await fetch('/api/chats/start', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ otherId, note }),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { id?: string };
+      if (data.id) return data.id;
+    }
+  } catch {
+    // fall through to direct insert
+  }
+
+  const existing = await findConversationWith(viewerId, otherId);
+  if (existing) return existing.id;
+
+  const id = safeRandomUUID();
+  const { error } = await supabase.from('conversations').insert({
+    id,
+    user_a: viewerId,
+    user_b: otherId,
+    initiator_id: viewerId,
+    request_note: note.trim().slice(0, REQUEST_NOTE_MAX),
+  });
   if (error && error.code !== UNIQUE_VIOLATION) {
     throw new Error(error.message.includes('Too many') ? 'You have too many requests waiting for an answer.' : 'Could not send your request. Try again.');
   }

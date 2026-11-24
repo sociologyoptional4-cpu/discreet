@@ -5,6 +5,7 @@ import { ensureSession } from '@/lib/session';
 import { sendStoryReaction } from '@/lib/storyReactions';
 import { groupStories, type StoryGroup, type StoryRow } from '@/lib/storyGroups';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { safeRandomUUID } from '@/lib/uuid';
 import type { MaskRecordingPayload } from '@/types/avatar';
 import type { RecordedSnapPayload } from '@/types/privacy';
 
@@ -64,7 +65,7 @@ export function useStories(): Stories {
       }).finally(() => { if (!stopped) setIsLoading(false); });
     };
     sync();
-    const channel = supabase.channel('stories:' + crypto.randomUUID())
+    const channel = supabase.channel('stories:' + safeRandomUUID())
       .on('postgres_changes', {event:'*', schema:'public', table:'stories'}, sync)
       .subscribe(status => { if (status === 'SUBSCRIBED') sync(); });
     const timer = setInterval(sync, 60000);
@@ -87,7 +88,7 @@ export function useStories(): Stories {
       const { mode, avatarId } = describeMedia(input);
       const session = await ensureSession();
       const uploaded = await uploadMedia(session.access_token, input, '1d');
-      const id = crypto.randomUUID();
+      const id = safeRandomUUID();
       // The database sets the 24-hour expiry itself; the client cannot make a story last longer.
       const { error: insertError } = await supabase.from('stories').insert({
         id, user_id: session.user.id, mode, avatar_id: avatarId, media_url: uploaded.mediaUrl, motion_url: uploaded.motionUrl,
@@ -137,7 +138,7 @@ export function useStoryReceipts(storyId: string | undefined, ownerId: string | 
     let refreshTimer: ReturnType<typeof setTimeout>;
     const schedule = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => void update(), 150); };
     void update();
-    const channel = supabase.channel('story-views:' + storyId + ':' + crypto.randomUUID())
+    const channel = supabase.channel('story-views:' + storyId + ':' + safeRandomUUID())
       .on('postgres_changes', {event:'INSERT', schema:'public', table:'story_views', filter:'story_id=eq.' + storyId}, schedule)
       .subscribe(status => { if (status === 'SUBSCRIBED') schedule(); });
     return () => { alive = false; clearTimeout(refreshTimer); void supabase.removeChannel(channel); };
