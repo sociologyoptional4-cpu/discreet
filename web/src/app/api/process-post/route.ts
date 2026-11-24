@@ -9,6 +9,8 @@ export const maxDuration = 120;
 
 const DEEPGRAM_URL = 'https://api.deepgram.com/v1/listen?model=nova-2&detect_language=en&detect_language=hi&smart_format=true';
 const GEMINI_MODEL = process.env.GEMINI_ANALYSIS_MODEL || 'gemini-2.5-flash';
+const JARVISLABS_BASE_URL = (process.env.JARVISLABS_BASE_URL || 'https://models.jarvislabs.net/v1').replace(/\/+$/, '');
+const JARVISLABS_MODEL = process.env.JARVISLABS_MODEL || 'deepseek-v4.1-flash-1017';
 const REQUEST_TIMEOUT_MS = 40_000;
 const MAX_TRANSCRIPT_CHARS = 6_000;
 
@@ -98,6 +100,29 @@ async function analyse(transcript: string, apiKey: string): Promise<Analysis> {
   return cleanAnalysis(JSON.parse(text));
 }
 
+async function analyseWithJarvisLabs(transcript: string, apiKey: string): Promise<Analysis> {
+  const response = await fetch(`${JARVISLABS_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: JARVISLABS_MODEL,
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Transcript:\n"""\n${transcript.slice(0, MAX_TRANSCRIPT_CHARS)}\n"""` },
+      ],
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`JarvisLabs responded ${response.status}`);
+  const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+  const raw = data.choices?.[0]?.message?.content?.trim();
+  if (!raw) throw new Error('JarvisLabs returned no text');
+  const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  return cleanAnalysis(JSON.parse(jsonText));
+}
+
 type PostSource = {
   id: string; media_url: string; transcript: string | null; topic_entity: string | null;
   expires_at: string | null;
@@ -110,8 +135,10 @@ export async function POST(request: Request): Promise<Response> {
   if (!isUuid(body?.postId)) return json({ error: 'Invalid post ID.' }, 400);
   const limited = await rateLimit(auth.userId, 'process-post');
   if (limited) return limited;
-  const { DEEPGRAM_API_KEY, GEMINI_API_KEY } = process.env;
-  if (!DEEPGRAM_API_KEY || !GEMINI_API_KEY) return json({ error: 'AI processing is not configured.' }, 503);
+  const { DEEPGRAM_API_KEY, GEMINI_API_KEY, JARVISLABS_API_KEY } = process.env;
+  if (!DEEPGRAM_API_KEY || (!GEMINI_API_KEY && !JARVISLABS_API_KEY)) {
+    return json({ error: 'AI processing is not configured.' }, 503);
+  }
 
   const admin = getSupabaseAdmin();
   const lease = new Date(Date.now() + 180_000).toISOString();
@@ -138,12 +165,14 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: 'Media ownership could not be verified.' }, 422);
     }
     const transcript = post.transcript ?? await transcribe(post.media_url, DEEPGRAM_API_KEY);
-    const analysis = transcript ? await analyse(transcript, GEMINI_API_KEY) : { ...SILENT_ANALYSIS };
+    const analysis = transcript
+      ? await (JARVISLABS_API_KEY ? analyseWithJarvisLabs(transcript, JARVISLABS_API_KEY) : analyse(transcript, GEMINI_API_KEY!))
+      : { ...SILENT_ANALYSIS };
     if (post.topic_entity) analysis.topic_entity = post.topic_entity;
     const document = [analysis.topic_entity, analysis.category, analysis.ai_summary, ...analysis.key_points, transcript].join('\n');
-    const embedding = await embedText(document, 'RETRIEVAL_DOCUMENT');
+    const embedding = GEMINI_API_KEY ? await embedText(document, 'RETRIEVAL_DOCUMENT').catch(() => null) : null;
     const result = await admin.from('posts').update({
-      transcript, ...analysis, embedding: JSON.stringify(embedding), processing_lease_until: null,
+      transcript, ...analysis, embedding: embedding ? JSON.stringify(embedding) : null, processing_lease_until: null,
     }).eq('id', post.id).eq('user_id', auth.userId).eq('processing_lease_until', lease)
       .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`).select('id').maybeSingle();
     if (result.error) return json({ error: 'Could not save the analysis.' }, 503);
