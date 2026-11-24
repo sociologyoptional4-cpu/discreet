@@ -8,6 +8,9 @@ import { supabase } from '@/lib/supabase';
 import type { MaskRecordingPayload } from '@/types/avatar';
 import type { ChatMeta, Outgoing, Retention, SnapView, StreakStatus } from '@/types/chat';
 import type { RecordedSnapPayload } from '@/types/privacy';
+import type { AvatarId } from '@/types/avatar';
+import { ALL_EMOJIS } from '@/lib/chat/messageFormat';
+import { encodeSticker, parseActionEvent, type AvatarAction, type AvatarActionEvent, type StickerId } from '@/lib/chat/stickerRegistry';
 
 const PAGE = 30;
 const local = (m: ChatMessage) => ['sending', 'queued_offline', 'failed'].includes(m.status);
@@ -18,6 +21,8 @@ async function history(id: string, before?: ChatMessage) {
   if (error) throw error;
   return data as MessageRow[];
 }
+const isReaction = (v: unknown): v is { messageId: string; emoji: string } =>
+  typeof v === 'object' && v !== null && typeof (v as Record<string, unknown>).messageId === 'string' && (ALL_EMOJIS as readonly string[]).includes(String((v as Record<string, unknown>).emoji));
 const messageOf = (e: unknown) => e instanceof Error ? e.message : 'The chat could not sync.';
 
 export function useChatEngine(conversationId: string, currentUserId: string) {
@@ -29,6 +34,10 @@ export function useChatEngine(conversationId: string, currentUserId: string) {
   const [peerPresent, setPeerPresent] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
   const [now, setNow] = useState(Date.now);
+  const [peerInRoom, setPeerInRoom] = useState(false);
+  const [reactions, setReactions] = useState<Record<string, string[]>>({});
+  const inRoom = useRef(false);
+  const actionListeners = useRef(new Set<(event: AvatarActionEvent) => void>());
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const sessionId = useRef<string | null>(null);
   const replayable = useRef(new Set<string>());
@@ -105,12 +114,20 @@ export function useChatEngine(conversationId: string, currentUserId: string) {
     const visibility = () => {
       if (!alive) return;
       const visible = document.visibilityState === 'visible';
-      void channel.track({is_in_chat: visible});
+      void channel.track({is_in_chat: visible, in_room: visible && inRoom.current});
       if (!visible) void supabase.rpc('leave_chat', {p_conversation_id: conversationId}).then();
       else setNow(Date.now());
     };
     channel.on('presence', {event: 'sync'}, () => {
-      if (alive) setPeerPresent(Object.entries(channel.presenceState<{is_in_chat: boolean}>()).some(([id, entries]) => id !== currentUserId && entries.some(e => e.is_in_chat)));
+      if (!alive) return;
+      const peers = Object.entries(channel.presenceState<{is_in_chat: boolean; in_room?: boolean}>()).filter(([id]) => id !== currentUserId).flatMap(([, entries]) => entries);
+      setPeerPresent(peers.some(e => e.is_in_chat));
+      setPeerInRoom(peers.some(e => e.in_room));
+    }).on('broadcast', {event: 'avatar_action'}, ({payload}) => {
+      const event = parseActionEvent(payload);
+      if (alive && event && event.from !== currentUserId) for (const listener of actionListeners.current) listener(event);
+    }).on('broadcast', {event: 'reaction'}, ({payload}) => {
+      if (alive && isReaction(payload)) setReactions(old => ({...old, [payload.messageId]: [...(old[payload.messageId] ?? []), payload.emoji].slice(-12)}));
     }).on('broadcast', {event: 'typing'}, () => {
       if (!alive) return;
       setPeerTyping(true);
@@ -194,6 +211,11 @@ export function useChatEngine(conversationId: string, currentUserId: string) {
     } catch (e) { fail(e); return null; }
   };
 
+  const onAvatarAction = useCallback((listener: (event: AvatarActionEvent) => void) => {
+    actionListeners.current.add(listener);
+    return () => { actionListeners.current.delete(listener); };
+  }, []);
+
   const age = meta?.streak_updated_at ? now - Date.parse(meta.streak_updated_at) : Infinity;
   const streakStatus: StreakStatus = age >= 86400000 ? 'expired' : age > 72000000 ? 'expiring_soon' : 'active';
   return {
@@ -201,6 +223,23 @@ export function useChatEngine(conversationId: string, currentUserId: string) {
     isLoading, hasMore, error, peerPresent, peerTyping, retention: meta?.retention_mode ?? 'after_viewing',
     streakStatus, streakCount: streakStatus === 'expired' ? 0 : meta?.streak_count ?? 0, loadOlderMessages,
     sendText: async (text: string) => { const body = text.trim(); if (body && body.length <= 2000) await send('text', body); },
+    peerInRoom, reactions,
+    sendAvatarSticker: (stickerId: StickerId, avatarId: AvatarId) => send('avatar_sticker', encodeSticker(stickerId, avatarId)),
+    /** Live actions go over Realtime Broadcast only; nothing is stored. The sender's own screen plays it at once. */
+    triggerLiveAction: (action: AvatarAction) => {
+      const event: AvatarActionEvent = {action, from: currentUserId, at: Date.now()};
+      for (const listener of actionListeners.current) listener(event);
+      void channelRef.current?.send({type: 'broadcast', event: 'avatar_action', payload: event});
+    },
+    onAvatarAction,
+    react: (messageId: string, emoji: string) => {
+      setReactions(old => ({...old, [messageId]: [...(old[messageId] ?? []), emoji].slice(-12)}));
+      void channelRef.current?.send({type: 'broadcast', event: 'reaction', payload: {messageId, emoji}});
+    },
+    setInRoom: (open: boolean) => {
+      inRoom.current = open;
+      void channelRef.current?.track({is_in_chat: document.visibilityState === 'visible', in_room: open});
+    },
     sendSnap: (payload: RecordedSnapPayload | MaskRecordingPayload) => send('snap', null, toMediaInput(payload)),
     retryMessage: (id: string) => retryOutgoing(currentUserId, id).catch(fail),
     openSnap, canReplay: (id: string) => replayable.current.has(id),

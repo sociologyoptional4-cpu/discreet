@@ -11,9 +11,13 @@ type Props = {
   onOpen: (id: string) => Promise<SnapView | null>;
   canReplay: boolean;
   onSignal: (reason: 'key' | 'hidden') => void;
+  /** Tapped with a second finger while the snap is held open. */
+  onQuickReact?: (emoji: string) => void;
 };
 
-export function HoldToViewSnap({ message, isOwnMessage, onOpen, canReplay, onSignal }: Props) {
+const QUICK = ['🔥', '😂', '❤️', '😮'];
+
+export function HoldToViewSnap({ message, isOwnMessage, onOpen, canReplay, onSignal, onQuickReact }: Props) {
   const [media, setMedia] = useState<{url: string; motionUrl: string | null} | null>(null);
   const gesture = useRef(0);
   const held = useRef(false);
@@ -101,8 +105,9 @@ export function HoldToViewSnap({ message, isOwnMessage, onOpen, canReplay, onSig
         onKeyUp={onKeyUp}
         onBlur={finish}
         aria-label={canOpen ? 'Hold to view snap. Press and hold Space or Enter, or press and hold with your finger.' : label}
-        className="rounded-full border border-white/30 px-4 py-2 text-sm disabled:opacity-60"
+        className="flex min-h-11 items-center gap-2 rounded-[22px] border border-white/90 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 shadow-[0_10px_28px_rgba(15,23,42,.06)] backdrop-blur-xl disabled:opacity-60"
       >
+        <span aria-hidden className={`size-3 rounded-sm ${message.snap_mode === 'mask' ? 'bg-violet-400' : 'bg-rose-400'} ${canOpen ? '' : 'opacity-40'}`} />
         {label}
       </button>
 
@@ -115,6 +120,18 @@ export function HoldToViewSnap({ message, isOwnMessage, onOpen, canReplay, onSig
               <SnapVideo src={media.url} />
             )}
           </div>
+          {!isOwnMessage && onQuickReact && (
+            // Stop pointer events here so a second finger reacting does not count as releasing the snap.
+            <div role="group" aria-label="Quick react" className="absolute inset-x-0 bottom-16 flex justify-center gap-4"
+              onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerLeave={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}>
+              {QUICK.map((emoji) => (
+                <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => onQuickReact(emoji)}
+                  className="flex size-12 items-center justify-center rounded-full border border-white/40 bg-white/20 text-2xl shadow-[0_8px_20px_rgba(0,0,0,.25)] backdrop-blur-md transition-transform active:scale-90">
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
           <p className="pointer-events-none absolute inset-x-0 bottom-6 text-center text-sm text-white/80">Release to close</p>
         </div>
       )}

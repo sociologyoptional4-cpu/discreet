@@ -1,0 +1,176 @@
+[
+  {
+    "id": "awesomelemon",
+    "name": "AwesomeLemon",
+    "series": "R2",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/awesomelemon.vrm"
+  },
+  {
+    "id": "baosamurai",
+    "name": "BaoSamurai",
+    "series": "R3",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/baosamurai.vrm"
+  },
+  {
+    "id": "carrot",
+    "name": "Carrot",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/carrot.vrm"
+  },
+  {
+    "id": "chilli",
+    "name": "Chilli",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/chilli.vrm"
+  },
+  {
+    "id": "clown",
+    "name": "Clown",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/clown.vrm"
+  },
+  {
+    "id": "cookieman",
+    "name": "Cookieman",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/cookieman.vrm"
+  },
+  {
+    "id": "coolbanana",
+    "name": "CoolBanana",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/coolbanana.vrm"
+  },
+  {
+    "id": "coolbunny",
+    "name": "CoolBunny",
+    "series": "R2",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/coolbunny.vrm"
+  },
+  {
+    "id": "coolcandle",
+    "name": "CoolCandle",
+    "series": "R2",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/coolcandle.vrm"
+  },
+  {
+    "id": "cooltiger",
+    "name": "CoolTiger",
+    "series": "R3",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/cooltiger.vrm"
+  },
+  {
+    "id": "crowley",
+    "name": "Crowley",
+    "series": "R3",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/crowley.vrm"
+  },
+  {
+    "id": "dracula",
+    "name": "Dracula",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/dracula.vrm"
+  },
+  {
+    "id": "ember",
+    "name": "Ember",
+    "series": "VTubeMe",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/ember.vrm"
+  },
+  {
+    "id": "eyewizard",
+    "name": "EYEWizard",
+    "series": "R2",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/eyewizard.vrm"
+  },
+  {
+    "id": "hourglassperson",
+    "name": "HourglassPerson",
+    "series": "R2",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/hourglassperson.vrm"
+  },
+  {
+    "id": "kai",
+    "name": "Kai",
+    "series": "VTubeMe",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/kai.vrm"
+  },
+  {
+    "id": "kiba",
+    "name": "Kiba",
+    "series": "R3",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/kiba.vrm"
+  },
+  {
+    "id": "ladykoi",
+    "name": "LadyKoi",
+    "series": "R3",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/ladykoi.vrm"
+  },
+  {
+    "id": "meganthefox",
+    "name": "MeganTheFox",
+    "series": "R3",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/meganthefox.vrm"
+  },
+  {
+    "id": "nightmare",
+    "name": "Nightmare",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/nightmare.vrm"
+  },
+  {
+    "id": "nova",
+    "name": "Nova",
+    "series": "VTubeMe",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/nova.vrm"
+  },
+  {
+    "id": "ranchu",
+    "name": "Ranchu",
+    "series": "R3",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/ranchu.vrm"
+  },
+  {
+    "id": "rose",
+    "name": "Rose",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/rose.vrm"
+  },
+  {
+    "id": "shiro",
+    "name": "Shiro",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/shiro.vrm"
+  },
+  {
+    "id": "sky",
+    "name": "Sky",
+    "series": "VTubeMe",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/sky.vrm"
+  },
+  {
+    "id": "snailkid",
+    "name": "SnailKid",
+    "series": "R3",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/snailkid.vrm"
+  },
+  {
+    "id": "vladi",
+    "name": "Vladi",
+    "series": "R3",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/vladi.vrm"
+  },
+  {
+    "id": "vrm1-sample",
+    "name": "VRM1 Sample",
+    "series": "VTubeMe",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/vrm1-sample.vrm"
+  },
+  {
+    "id": "watermelon",
+    "name": "Watermelon",
+    "series": "R1",
+    "vrmUrl": "https://pub-ae35fd27defb4719a41aa0f50c7dd2dc.r2.dev/avatars/watermelon.vrm"
+  }
+]

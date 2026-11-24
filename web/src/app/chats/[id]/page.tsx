@@ -12,7 +12,7 @@ async function Thread({ params }: PageProps<'/chats/[id]'>) {
 
 export default function ChatThreadPage(props: PageProps<'/chats/[id]'>) {
   return (
-    <main className="bg-[#0A0A0A]">
+    <main className="relative mx-auto min-h-[100dvh] w-full max-w-[430px] overflow-x-hidden bg-[#F2F4F7] text-[#111827]">
       <Suspense fallback={<StateMessage title="Loading chat…" />}>
         <Thread {...props} />
       </Suspense>

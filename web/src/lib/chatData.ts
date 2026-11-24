@@ -53,3 +53,14 @@ export async function declineConversation(id: string): Promise<void> {
   const { error } = await supabase.from('conversations').delete().eq('id', id);
   if (error) throw new Error('Could not decline this request.');
 }
+
+export type SuggestedCreator = { id: string; username: string; avatarId: string };
+
+/** Popular creators to wave at, for an empty inbox. Excludes the viewer and anyone already in a chat with them. */
+export async function fetchSuggestedCreators(viewerId: string, exclude: readonly string[]): Promise<SuggestedCreator[]> {
+  const { data, error } = await supabase.from('users').select('id, username, avatar_id').neq('id', viewerId).order('followers_count', { ascending: false }).limit(12);
+  if (error) throw new Error('Could not load suggestions.');
+  return (data as { id: string; username: string; avatar_id: string }[])
+    .filter((u) => !exclude.includes(u.id))
+    .map((u) => ({ id: u.id, username: u.username, avatarId: u.avatar_id }));
+}

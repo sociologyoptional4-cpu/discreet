@@ -7,8 +7,10 @@ import { MessageButton } from '@/components/MessageButton';
 import { EmotionResultCard } from '@/components/EmotionResultCard';
 import { StateMessage } from '@/components/StateMessage';
 import { useSocialActions } from '@/hooks/useSocialActions';
+import { AVATAR_CATALOG, getChosenAvatarUrl, setChosenAvatarUrl } from '@/lib/avatarCatalog';
 import { AVATAR_META } from '@/lib/avatars';
 import { fetchIsFollowing, fetchOwnProfile, fetchProfile, fetchProfilePosts } from '@/lib/feedData';
+import { supabase } from '@/lib/supabase';
 import type { Profile, PublicPost } from '@/types/social';
 
 type Loaded =
@@ -21,6 +23,8 @@ const MODE_LABEL = { mask: '3D Mask', blur: 'Blur', shadow: 'Shadow', noface: 'N
 /** A creator's faceless profile: avatar badge, counters, Follow button, and a grid of their public (never Incog) posts. */
 export function ProfileScreen({ username }: { username: string }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [chosenUrl, setChosenUrl] = useState<string | null>(() => getChosenAvatarUrl());
   const social = useSocialActions();
 
   useEffect(() => {
@@ -92,6 +96,42 @@ export function ProfileScreen({ username }: { username: string }) {
           </button>
         )}
         {!isOwn && username !== 'me' && <MessageButton creatorId={profile.id} />}
+        {isOwn && (
+          <div className="w-full max-w-sm">
+            <button
+              type="button"
+              onClick={() => setGalleryOpen((o) => !o)}
+              className="acrylic-pill min-h-10 px-4 text-xs font-semibold text-slate-800"
+            >
+              {galleryOpen ? 'Hide 3D Avatars' : `Choose 3D Avatar (${AVATAR_CATALOG.length})`}
+            </button>
+            {galleryOpen && (
+              <div className="mt-3 grid max-h-60 grid-cols-3 gap-2 overflow-y-auto rounded-2xl border border-white/85 bg-white/75 p-2.5 text-left shadow-sm backdrop-blur-xl">
+                {AVATAR_CATALOG.map((item) => {
+                  const active = chosenUrl === item.vrmUrl;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setChosenAvatarUrl(item.vrmUrl);
+                        setChosenUrl(item.vrmUrl);
+                        setGalleryOpen(false);
+                        void supabase.from('users').update({ custom_avatar_url: item.vrmUrl }).eq('id', profile.id);
+                      }}
+                      className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition ${
+                        active ? 'bg-slate-900 text-white' : 'bg-white/80 text-slate-800 hover:bg-white'
+                      }`}
+                    >
+                      <span className="block truncate">{item.name}</span>
+                      <span className={`block text-[10px] ${active ? 'text-white/70' : 'text-slate-500'}`}>{item.series}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         {social.error && <p role="alert" className="text-sm text-rose-700">{social.error}</p>}
       </header>
 

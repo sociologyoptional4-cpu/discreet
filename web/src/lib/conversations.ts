@@ -27,6 +27,8 @@ export type ConversationItem = {
   lastMessageAt: string;
   unread: number;
   streak: number;
+  /** More than 20 hours since the last mutual snap: the streak ends at 24. */
+  streakExpiring: boolean;
   /** The other person in the conversation. */
   other: { id: string; username: string; avatarId: string };
   /** A request somebody else sent to the viewer, waiting for their answer. */
@@ -48,6 +50,7 @@ export function toConversationItem(row: ConversationRow, viewerId: string): Conv
     lastMessageAt: row.last_message_at,
     unread: (row.user_a === viewerId ? row.user_a_unread : row.user_b_unread) ?? 0,
     streak: row.streak_updated_at && Date.now() - Date.parse(row.streak_updated_at) < 86400000 ? row.streak_count ?? 0 : 0,
+    streakExpiring: !!row.streak_updated_at && (row.streak_count ?? 0) > 0 && Date.now() - Date.parse(row.streak_updated_at) > 72000000 && Date.now() - Date.parse(row.streak_updated_at) < 86400000,
     other: { id: otherId, username: person?.username ?? 'unknown', avatarId: person?.avatar_id ?? 'cyber_monk' },
     incoming: row.status === 'pending' && row.initiator_id !== viewerId,
   };

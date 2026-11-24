@@ -7,11 +7,13 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneRig } from 'three/addons/utils/SkeletonUtils.js';
 import { applyMotionToVRM } from '@/lib/mocap/retargeter';
+import { getChosenAvatarUrl, getDefaultVrmUrl, getGuestRandomAvatar } from '@/lib/avatarCatalog';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
 import type { AvatarId, MotionFrame } from '@/types/avatar';
 
 type Props = {
   avatarId: AvatarId;
+  vrmUrl?: string | null;
   /**
    * The latest captured or played-back frame. Another part of the app writes it; this component only reads it inside
    * `useFrame`, so the animation never causes a React render.
@@ -34,7 +36,7 @@ const clamp = THREE.MathUtils.clamp;
 /* ---------------------------------------------------------------- VRM Path */
 
 const VRM_CACHE_NAME = 'vybe-vrm-cache-v1';
-const missingVrm = new Set<AvatarId>();
+const failedUrls = new Set<string>();
 
 async function fetchVrmBuffer(url: string, signal: AbortSignal): Promise<ArrayBuffer> {
   if (typeof caches !== 'undefined') {
@@ -55,19 +57,18 @@ async function fetchVrmBuffer(url: string, signal: AbortSignal): Promise<ArrayBu
   return await res.arrayBuffer();
 }
 
-function VrmAvatar({ avatarId, currentFrameRef, onUnavailable }: Props & { onUnavailable: () => void }) {
+function VrmAvatar({ url, currentFrameRef, onUnavailable }: { url: string; currentFrameRef: RefObject<MotionFrame | null>; onUnavailable: () => void }) {
   const [vrm, setVrm] = useState<VRM | null>(null);
   const onUnavailableRef = useRef(onUnavailable);
   useEffect(() => { onUnavailableRef.current = onUnavailable; }, [onUnavailable]);
 
   useEffect(() => {
-    if (missingVrm.has(avatarId)) {
+    if (!url || failedUrls.has(url)) {
       onUnavailableRef.current();
       return;
     }
     const ctrl = new AbortController();
     let loaded: VRM | null = null;
-    const url = `/avatars/${avatarId}.vrm`;
 
     fetchVrmBuffer(url, ctrl.signal)
       .then((buf) => {
@@ -97,7 +98,7 @@ function VrmAvatar({ avatarId, currentFrameRef, onUnavailable }: Props & { onUna
       })
       .catch((err) => {
         if ((err as Error)?.name === 'AbortError') return;
-        missingVrm.add(avatarId);
+        failedUrls.add(url);
         onUnavailableRef.current();
       });
 
@@ -109,7 +110,7 @@ function VrmAvatar({ avatarId, currentFrameRef, onUnavailable }: Props & { onUna
       }
       setVrm(null);
     };
-  }, [avatarId]);
+  }, [url]);
 
   useFrame(({ clock }, delta) => {
     if (!vrm) return;
@@ -424,16 +425,18 @@ function FitCamera() {
   return null;
 }
 
-function Character({ avatarId, currentFrameRef }: Props) {
-  const [failedVrmFor, setFailedVrmFor] = useState<AvatarId | null>(null);
-  const useVrm = !missingVrm.has(avatarId) && failedVrmFor !== avatarId;
+/** One avatar for use inside any R3F canvas (the chat stage reuses it so there is only one WebGL context). */
+export function Character({ avatarId, vrmUrl, currentFrameRef }: Props) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const resolvedUrl = vrmUrl || getChosenAvatarUrl() || getGuestRandomAvatar()?.vrmUrl || getDefaultVrmUrl(avatarId);
+  const useVrm = Boolean(resolvedUrl) && !failedUrls.has(resolvedUrl) && failedUrl !== resolvedUrl;
 
   if (useVrm) {
     return (
       <VrmAvatar
-        avatarId={avatarId}
+        url={resolvedUrl}
         currentFrameRef={currentFrameRef}
-        onUnavailable={() => setFailedVrmFor(avatarId)}
+        onUnavailable={() => setFailedUrl(resolvedUrl)}
       />
     );
   }
@@ -450,7 +453,7 @@ function Character({ avatarId, currentFrameRef }: Props) {
 /**
  * The single shared WebGL canvas. Caps DPR at [1, 1.5] for iOS Safari stability and recovers from context loss.
  */
-export function AvatarStage({ avatarId, currentFrameRef, fill = false }: Props & { fill?: boolean }) {
+export function AvatarStage({ avatarId, vrmUrl, currentFrameRef, fill = false }: Props & { fill?: boolean }) {
   const [contextLost, setContextLost] = useState(false);
 
   return (
@@ -476,7 +479,7 @@ export function AvatarStage({ avatarId, currentFrameRef, fill = false }: Props &
         <ambientLight intensity={1.0} />
         <directionalLight position={[1.5, 2.5, 3]} intensity={2.2} />
         <directionalLight position={[-2, 1.2, -2]} intensity={3} color={THEMES[avatarId].rim} />
-        <Character avatarId={avatarId} currentFrameRef={currentFrameRef} />
+        <Character avatarId={avatarId} vrmUrl={vrmUrl} currentFrameRef={currentFrameRef} />
       </Canvas>
       {contextLost && (
         <div role="status" className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs font-medium text-white backdrop-blur-sm">

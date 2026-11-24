@@ -17,7 +17,10 @@ const ITEMS: { href: string; label: string; Icon: LucideIcon; center?: boolean }
 
 /** Screens that take over the display have no navigation: the welcome page, camera, calibration and open chat threads. */
 const HIDDEN_EXACT = ['/'];
-const HIDDEN_PREFIX = ['/record', '/persona', '/chats/'];
+const HIDDEN_SECTIONS = ['/record', '/persona'];
+/** An open thread (`/chats/<id>`) hides the nav; the inbox (`/chats`) keeps it. */
+const isHidden = (path: string) =>
+  HIDDEN_EXACT.includes(path) || HIDDEN_SECTIONS.some((p) => path === p || path.startsWith(`${p}/`)) || path.startsWith('/chats/');
 
 /** A floating glass pill. It slides away while a feed card is expanded or the camera is open. */
 export function BottomNav() {
@@ -27,8 +30,7 @@ export function BottomNav() {
   const immersive = useImmersive();
   const reduceMotion = useReducedMotion();
 
-  const hidden = HIDDEN_EXACT.includes(pathname) || HIDDEN_PREFIX.some((p) => pathname === p.replace(/\/$/, '') || pathname.startsWith(p));
-  if (hidden) return null;
+  if (isHidden(pathname)) return null;
   const onFeed = pathname === '/feed' || pathname.startsWith('/feed/');
 
   return (
