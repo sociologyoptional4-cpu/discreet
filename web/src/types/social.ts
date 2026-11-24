@@ -22,6 +22,7 @@ export type PublicPost = {
   sentiment: Sentiment | null;
   ai_summary: string | null;
   likes_count: number;
+  comments_count?: number;
   expiry_tier: ExpiryTier;
   expires_at: string | null;
   created_at: string;

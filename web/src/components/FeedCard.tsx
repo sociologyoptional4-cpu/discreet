@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type 
 import { Play } from 'lucide-react';
 import { SwipeBubbleOverlay } from '@/components/SwipeBubbleOverlay';
 import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
-import { FollowButton, ShareOrb, SoundOrb } from '@/components/feed/FeedControls';
+import { CommentOrb, FollowButton, ShareOrb, SoundOrb } from '@/components/feed/FeedControls';
 import type { SocialActions } from '@/hooks/useSocialActions';
 import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
@@ -32,6 +32,8 @@ export type FeedCardProps = {
   dimmed: boolean;
   /** Every reaction (emoji tap or double-tap like), with where it happened, so the feed can burst and glow. */
   onReact: (emoji: string, x: number, y: number) => void;
+  commentsCount?: number;
+  onOpenComments?: () => void;
 };
 
 const HEART = '❤️';
@@ -186,6 +188,9 @@ export function FeedCard(props: FeedCardProps) {
           <div className="mt-2 flex gap-2">
             <SoundOrb soundOn={soundOn} playing={active && !paused} onToggle={onToggleSound} />
             <ShareOrb onShare={onShare} />
+            {props.onOpenComments && (
+              <CommentOrb count={props.commentsCount ?? item.comments_count ?? 0} onOpen={props.onOpenComments} />
+            )}
           </div>
         </div>
       </header>

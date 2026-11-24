@@ -1,6 +1,6 @@
 'use client';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Check, Share2, VolumeX } from 'lucide-react';
+import { Check, MessageCircle, Share2, VolumeX } from 'lucide-react';
 import { useState } from 'react';
 
 const SPRING = { type: 'spring', stiffness: 420, damping: 22 } as const;
@@ -81,6 +81,30 @@ export function ShareOrb({ onShare }: { onShare: () => void }) {
         animate={launch ? { x: [0, 6, -2, 0], y: [0, -8, 3, 0], rotate: [0, 18, -6, 0] } : undefined} transition={{ duration: 0.55, ease: 'easeOut' }}>
         <Share2 aria-hidden className="size-4" />
       </motion.span>
+    </motion.button>
+  );
+}
+
+/** Minimal translucent glass Comment Orb with live comments_count badge. */
+export function CommentOrb({ count = 0, onOpen }: { count?: number; onOpen: () => void }) {
+  return (
+    <motion.button
+      type="button"
+      aria-label={`Comments (${count})`}
+      whileTap={{ scale: 0.86 }}
+      transition={SPRING}
+      className={ORB}
+      onClick={() => {
+        vibrate(10);
+        onOpen();
+      }}
+    >
+      <MessageCircle aria-hidden className="size-4" />
+      {count > 0 && (
+        <span className="pointer-events-none absolute -right-1.5 -top-1 flex min-w-[18px] items-center justify-center rounded-full border border-white/80 bg-white/90 px-1 text-[10px] font-extrabold tabular-nums text-slate-900 shadow">
+          {count > 99 ? '99+' : count}
+        </span>
+      )}
     </motion.button>
   );
 }

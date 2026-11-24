@@ -16,15 +16,26 @@ export async function withViewerState(posts: PublicPost[]): Promise<FeedItem[]> 
   if (!viewerId || posts.length === 0) return posts.map((p) => ({ ...p, liked: false, following: false }));
 
   const creatorIds = [...new Set(posts.map((p) => p.user_id).filter((id): id is string => id !== null))];
-  const [likes, follows] = await Promise.all([
-    supabase.from('post_likes').select('post_id').eq('user_id', viewerId).in('post_id', posts.map((p) => p.id)),
+  const postIds = posts.map((p) => p.id);
+  const [likes, follows, commentRows] = await Promise.all([
+    supabase.from('post_likes').select('post_id').eq('user_id', viewerId).in('post_id', postIds),
     creatorIds.length > 0
       ? supabase.from('follows').select('following_id').eq('follower_id', viewerId).in('following_id', creatorIds)
       : Promise.resolve({ data: [] as { following_id: string }[], error: null }),
+    supabase.from('post_comments').select('post_id').in('post_id', postIds),
   ]);
   const liked = new Set((likes.data ?? []).map((r) => r.post_id as string));
   const following = new Set((follows.data ?? []).map((r) => r.following_id as string));
-  return posts.map((p) => ({ ...p, liked: liked.has(p.id), following: p.user_id !== null && following.has(p.user_id) }));
+  const commentCounts = new Map<string, number>();
+  for (const row of (commentRows.data ?? []) as { post_id: string }[]) {
+    commentCounts.set(row.post_id, (commentCounts.get(row.post_id) ?? 0) + 1);
+  }
+  return posts.map((p) => ({
+    ...p,
+    comments_count: commentCounts.get(p.id) ?? p.comments_count ?? 0,
+    liked: liked.has(p.id),
+    following: p.user_id !== null && following.has(p.user_id),
+  }));
 }
 
 /** Newest live posts. `focusPostId` (opened from search) is fetched separately and put first. */

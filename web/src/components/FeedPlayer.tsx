@@ -10,6 +10,7 @@ import { LiquidWarpCard } from '@/components/LiquidWarpCard';
 import { ComboBurstLayer, useComboBurst } from '@/components/chat/EmojiReactionSystem';
 import { AIFeedNudge, type FeedNudge } from '@/components/feed/AIFeedNudge';
 import { AuroraEdgeGlow } from '@/components/feed/AuroraEdgeGlow';
+import { CommentsDrawer } from '@/components/feed/CommentsDrawer';
 import { EdgeEmojiArc } from '@/components/feed/EdgeEmojiArc';
 import { FeedGamificationHUD, type FeedMilestone } from '@/components/feed/FeedGamificationHUD';
 import { LiquidGlassNav } from '@/components/feed/LiquidGlassNav';
@@ -85,6 +86,8 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
     return () => { host.remove(); maskBar.current = null; };
   }, [maskHost, active]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
   const [pausedId, setPausedId] = useState<string | null>(null);
   const [soundOn, setSoundOn] = useState(false); // browsers allow sound only after a tap, so the feed starts muted
   const [note, setNote] = useState<string | null>(null);
@@ -115,6 +118,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
 
   const activeId = active?.id;
   const expanded = expandedId !== null;
+  const commentsOpen = commentsPostId !== null;
 
   useEffect(() => {
     const next = items[activeIndex + 1];
@@ -241,7 +245,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
           role="feed"
           aria-label="Posts"
           tabIndex={0}
-          className={`h-dvh snap-y snap-mandatory overscroll-y-contain [scrollbar-width:none] focus-visible:outline-none ${expanded ? 'overflow-hidden' : 'overflow-y-auto'}`}
+          className={`h-dvh snap-y snap-mandatory overscroll-y-contain [scrollbar-width:none] focus-visible:outline-none ${expanded || commentsOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
           style={{ scrollSnapType: 'y mandatory', paddingBlock: PEEK_PX }}
         >
           {items.map((item, index) => {
@@ -276,6 +280,8 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
                 onShare={() => void share(item)}
                 dimmed={dimmed}
                 onReact={react}
+                commentsCount={commentCounts[item.id] ?? item.comments_count ?? 0}
+                onOpenComments={() => setCommentsPostId(item.id)}
               />
               </LiquidWarpCard>
             </article>
@@ -289,6 +295,12 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
       <LiquidGlassNav open={navOpen} onOpenChange={setNavOpen} />
       <AIFeedNudge nudge={nudge} onDismiss={() => setNudge(null)}
         onAction={() => { const target = followedAhead(items, activeIndex); if (target) jumpTo(target.id); else setNudge(null); }} />
+      <CommentsDrawer
+        postId={commentsPostId}
+        initialCount={commentsPostId ? (commentCounts[commentsPostId] ?? active?.comments_count ?? 0) : 0}
+        onClose={() => setCommentsPostId(null)}
+        onCountChange={(pid, count) => setCommentCounts((prev) => (prev[pid] === count ? prev : { ...prev, [pid]: count }))}
+      />
       <ComboBurstLayer bursts={burst.bursts} />
 
       {(note || social.error) && (
