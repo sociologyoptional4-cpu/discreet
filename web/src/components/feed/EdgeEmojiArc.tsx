@@ -4,8 +4,10 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
 
 export const ARC_EMOJIS = ['😍', '❤️', '😂', '🔥', '😮', '💀'] as const;
-const EDGE_PX = 44;
-const PULL_PX = 28;
+/** A rightward drag this long, mostly horizontal, from anywhere on the video opens the wheel. */
+const PULL_PX = 40;
+/** Phones use the outermost strip for "back"; drags starting there are left to the browser. */
+const SYSTEM_EDGE_PX = 20;
 const RADIUS = 160;
 const BULGE = 92;
 const STEP = (24 * Math.PI) / 180;
@@ -18,15 +20,15 @@ const SPRING = { type: 'spring', stiffness: 380, damping: 26 } as const;
 const tick = (ms = 10) => { if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(ms); };
 
 type Props = {
-  /** The feed shell: a pull that starts within 44 px of its left edge opens the wheel. */
+  /** The feed shell: a left-to-right drag anywhere on it opens the wheel. */
   rootRef: RefObject<HTMLElement | null>;
   onReact: (emoji: string, x: number, y: number) => void;
   disabled?: boolean;
 };
 
 /**
- * Reactions hidden behind the left edge. Pull right from the edge (or tap the light sliver) and a curved wheel of
- * emoji glides out; slide along it to focus one, release or tap to send, tap anywhere else to put it away.
+ * Reactions hidden behind the left edge. Drag left-to-right anywhere on the video (or tap the light sliver) and a
+ * curved wheel of emoji glides out from the left; slide along it to focus one, release or tap to send, tap anywhere else to put it away.
  */
 export function EdgeEmojiArc({ rootRef, onReact, disabled = false }: Props) {
   const [open, setOpen] = useState(false);
@@ -40,12 +42,12 @@ export function EdgeEmojiArc({ rootRef, onReact, disabled = false }: Props) {
     let start: { x: number; y: number } | null = null;
     const down = (e: PointerEvent) => {
       const box = root.getBoundingClientRect();
-      start = e.clientX - box.left < EDGE_PX ? { x: e.clientX, y: e.clientY } : null;
+      start = e.clientX - box.left > SYSTEM_EDGE_PX ? { x: e.clientX, y: e.clientY } : null;
     };
     const move = (e: PointerEvent) => {
       if (!start) return;
       const dx = e.clientX - start.x;
-      if (dx > PULL_PX && dx > Math.abs(e.clientY - start.y)) {
+      if (dx > PULL_PX && dx > Math.abs(e.clientY - start.y) * 1.5) {
         start = null;
         tick(12);
         setOpen(true);

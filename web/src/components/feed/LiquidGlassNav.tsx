@@ -16,7 +16,7 @@ const GAP = 8;
 const SPRING = { type: 'spring', stiffness: 340, damping: 24 } as const;
 /** Each orb's offset from the corner orb when open: the close button stays in the corner, the rest spread left. */
 const offset = (i: number): number => -(ITEMS.length - i) * (ORB + GAP);
-const tint = 'rgb(var(--feed-accent-rgb) / 0.42)';
+const tint = 'rgb(var(--feed-accent-rgb) / 0.22)';
 
 type Props = { open: boolean; onOpenChange: (open: boolean) => void };
 
@@ -51,9 +51,8 @@ export function LiquidGlassNav({ open, onOpenChange }: Props) {
         <div aria-hidden className="absolute bottom-0 right-0" style={{ width: (ITEMS.length + 1) * (ORB + GAP), height: ORB, filter: reduce ? undefined : `url(#${gooId})` }}>
           {ITEMS.map((item, i) => (
             <motion.span key={item.href} className="absolute right-0 top-0 rounded-full will-change-transform" style={{ background: tint, width: ORB, height: ORB }}
-              initial={false} animate={{ x: open ? offset(i) : 0, scale: open ? 1 : 0.6 }} transition={{ ...SPRING, delay: open ? (ITEMS.length - i) * 0.03 : 0 }} />
+              initial={false} animate={{ x: open ? offset(i) : 0, scale: open ? 1 : 0.6, opacity: open ? 1 : 0 }} transition={{ ...SPRING, delay: open ? (ITEMS.length - i) * 0.03 : 0 }} />
           ))}
-          <span className="absolute right-0 top-0 rounded-full" style={{ background: tint, width: ORB, height: ORB }} />
         </div>
 
         <AnimatePresence>
@@ -71,13 +70,9 @@ export function LiquidGlassNav({ open, onOpenChange }: Props) {
 
         <motion.button type="button" onClick={() => onOpenChange(!open)} aria-expanded={open} aria-label={open ? 'Close navigation' : 'Open navigation'}
           whileTap={{ scale: 0.88 }} transition={SPRING}
-          className="pointer-events-auto absolute inset-0 flex items-center justify-center rounded-full border border-white/40 text-white backdrop-blur-md transition-shadow duration-700 focus-visible:outline-2 focus-visible:outline-white"
-          style={{ boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,.55), inset 0 -6px 12px rgb(var(--feed-accent-rgb) / 0.35), 0 0 18px rgb(var(--feed-accent-rgb) / 0.55), 0 0 2px rgb(var(--feed-accent-rgb) / 0.9)' }}>
-          {!open && !reduce && (
-            <motion.span aria-hidden className="absolute -inset-1 rounded-full border border-white/25"
-              animate={{ scale: [1, 1.18, 1], opacity: [0.5, 0, 0.5] }} transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }} />
-          )}
-          <span aria-hidden className="absolute left-2 top-1.5 h-3 w-5 rounded-full bg-gradient-to-b from-white/70 to-transparent blur-[1px]" />
+          className="pointer-events-auto absolute inset-0 flex items-center justify-center rounded-full border border-white/20 text-white/90 backdrop-blur-md transition-[box-shadow,background-color] duration-1000 focus-visible:outline-2 focus-visible:outline-white"
+          style={{ backgroundColor: 'rgb(var(--feed-accent-rgb) / 0.12)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.35), 0 0 6px rgb(var(--feed-accent-rgb) / 0.18)' }}>
+          <span aria-hidden className="absolute left-2.5 top-1.5 h-2.5 w-4 rounded-full bg-gradient-to-b from-white/35 to-transparent blur-[1px]" />
           <AnimatePresence mode="wait" initial={false}>
             <motion.span key={String(open)} initial={{ rotate: -90, scale: 0.5, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 90, scale: 0.5, opacity: 0 }} transition={SPRING} className="relative flex">
               {open ? <X aria-hidden className="size-5" /> : <Sparkles aria-hidden className="size-5" />}

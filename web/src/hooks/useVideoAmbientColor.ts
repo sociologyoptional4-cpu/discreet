@@ -5,7 +5,7 @@ const SAMPLE_MS = 600;
 const SIZE = 8;
 export const FALLBACK_RGB = '165 180 252';
 
-/** The average of an 8x8 sample, pushed towards saturation so dull frames still give a usable tint. */
+/** The average of an 8x8 sample, nudged slightly towards saturation so the tint matches the video without shouting. */
 export function accentFromPixels(data: Uint8ClampedArray): string {
   let r = 0, g = 0, b = 0, n = 0;
   for (let i = 0; i < data.length; i += 4) {
@@ -15,7 +15,7 @@ export function accentFromPixels(data: Uint8ClampedArray): string {
   if (n === 0) return FALLBACK_RGB;
   [r, g, b] = [r / n, g / n, b / n];
   const mean = (r + g + b) / 3;
-  const boost = (c: number) => Math.round(Math.min(255, Math.max(40, mean + (c - mean) * 1.8 + 30)));
+  const boost = (c: number) => Math.round(Math.min(255, Math.max(40, mean + (c - mean) * 1.2 + 10)));
   return `${boost(r)} ${boost(g)} ${boost(b)}`;
 }
 
