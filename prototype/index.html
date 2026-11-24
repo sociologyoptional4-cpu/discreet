@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nearby Chat prototype</title>
+<script>/* Apply the saved theme before first paint so there is no bright flash. */
+try{var t=localStorage.getItem('nc-theme')||'system';document.documentElement.dataset.app=t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t}catch(e){document.documentElement.dataset.app='light'}</script>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="top">
+  <h1>Nearby Chat — iPhone prototype v3</h1>
+  <p>Talk nearby, meet tonight — now with live status, hold-to-view snaps, plan cards and a floating glass nav. Every screen is clickable and runs on local seeded data. Two fictional adult personas let you play both sides of a request. Network timing is simulated so you can see pending, sent and failed states.</p>
+</header>
+
+<main class="stage">
+  <div class="phone" id="phone">
+    <div class="device">
+      <div class="island" aria-hidden="true"></div>
+      <div class="sbar" aria-hidden="true"><span>9:41</span>
+        <svg viewBox="0 0 64 12"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/><path d="M27 4.5a8 8 0 0 1 10 0l-1.4 1.6a6 6 0 0 0-7.2 0zM29.2 7a5 5 0 0 1 5.6 0L32 10z"/><rect x="42" y="1" width="20" height="10" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45"/><rect x="44" y="3" width="15" height="6" rx="1.5"/></svg></div>
+      <div id="screen" class="screen"></div>
+      <nav id="tabbar" class="tabs glass-bar" aria-label="Main"></nav>
+      <div id="overlay"></div>
+      <div id="fx" aria-hidden="true"></div>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <div class="home" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <aside class="demo" aria-labelledby="demo-h">
+    <h2 id="demo-h">Demo controls</h2>
+    <p class="st" id="demo-status"></p>
+    <fieldset><legend>Signed-in persona</legend><div class="segs">
+      <label><input type="radio" name="persona" value="maya" data-demo="persona"><span>Maya, 27</span></label>
+      <label><input type="radio" name="persona" value="kabir" data-demo="persona"><span>Kabir, 29</span></label></div></fieldset>
+    <fieldset><legend>Theme</legend><div class="segs">
+      <label><input type="radio" name="theme" value="system" data-demo="theme"><span>System</span></label>
+      <label><input type="radio" name="theme" value="light" data-demo="theme"><span>Pearl Lavender</span></label>
+      <label><input type="radio" name="theme" value="dark" data-demo="theme"><span>Midnight Plum</span></label></div></fieldset>
+    <fieldset><legend>Network (simulated)</legend><div class="segs">
+      <label><input type="radio" name="net" value="fast" data-demo="net"><span>Fast</span></label>
+      <label><input type="radio" name="net" value="slow" data-demo="net"><span>Slow 3G</span></label>
+      <label><input type="radio" name="net" value="offline" data-demo="net"><span>Offline</span></label></div></fieldset>
+    <fieldset><legend>iPhone width</legend><div class="segs">
+      <label><input type="radio" name="w" value="375" data-demo="width"><span>Compact 375</span></label>
+      <label><input type="radio" name="w" value="390" data-demo="width"><span>Standard 390</span></label>
+      <label><input type="radio" name="w" value="430" data-demo="width"><span>Max 430</span></label></div></fieldset>
+    <fieldset><legend>Text size (Dynamic Type)</legend><div class="segs">
+      <label><input type="radio" name="ts" value="1" data-demo="ts"><span>Default</span></label>
+      <label><input type="radio" name="ts" value="1.15" data-demo="ts"><span>Large</span></label>
+      <label><input type="radio" name="ts" value="1.32" data-demo="ts"><span>Extra large</span></label></div></fieldset>
+    <fieldset><legend>Location permission</legend><div class="segs">
+      <label><input type="radio" name="perm" value="ask" data-demo="perm"><span>Not asked</span></label>
+      <label><input type="radio" name="perm" value="granted" data-demo="perm"><span>Allowed</span></label>
+      <label><input type="radio" name="perm" value="denied" data-demo="perm"><span>Denied</span></label></div></fieldset>
+    <fieldset><legend>Conditions</legend><div class="chks">
+      <label class="chk"><input type="checkbox" data-demo="failNext"> Next action fails</label>
+      <label class="chk"><input type="checkbox" data-demo="reduce"> Reduce Motion</label>
+      <label class="chk"><input type="checkbox" data-demo="rt"> Reduce Transparency</label>
+      <label class="chk"><input type="checkbox" data-demo="stress"> 300-row inbox fixture</label></div></fieldset>
+    <fieldset><legend>Jump to</legend><div class="jumps" id="demo-actions">
+      <button data-jump="onboard">Onboarding</button><button data-jump="chats">Chats</button><button data-jump="requests">Requests</button>
+      <button data-jump="convo">Conversation</button><button data-jump="long">1,000-message thread</button><button data-jump="nearby">Nearby</button>
+      <button data-jump="profile">Profile reveal</button><button data-jump="me">My profile</button><button data-jump="edit">Edit profile</button><button data-jump="reset">Reset demo</button></div></fieldset>
+    <ol class="flows">
+      <li><b>Request with a reason → accept → chat</b>As Maya: Nearby → Kabir → Reply to a prompt → Send. Switch to Kabir → Chats → Chat requests → Accept → Open chat. The note opens the thread.</li>
+      <li><b>Slow network, failure, retry</b>Network: Slow 3G → send a message and watch Sending → Sent. Tick “Next action fails”, send, then tap the red bubble.</li>
+      <li><b>Icebreaker + plan</b>In any chat tap ✦ for an icebreaker, or the calendar for a plan. Switch persona to answer or confirm, then share the plan.</li>
+      <li><b>Spark &amp; snap</b>Chats → swipe a row right (or tap ✨) to send a Spark. Open Tara’s chat, press and hold the blurred snap, release. Camera button sends one back.</li>
+      <li><b>Free tonight strip</b>Tap a mint-ringed avatar under “Chats”, react with an emoji, send. Pick a prompt on a Nearby card to reply with an optional snap.</li>
+      <li><b>Tonight</b>Profile → Post a Tonight status. Nearby → Free tonight shows who’s up for something now.</li>
+      <li><b>Older messages</b>Open the 1,000-message thread and scroll up. Use “Simulate incoming message” from ••• while scrolled up.</li>
+      <li><b>Location denied, block, theme</b>Denied → Nearby → Use approximate location → Choose city. Block from any chat. Theme switch in Profile.</li>
+    </ol>
+  </aside>
+</main>
+
+<section class="band" aria-labelledby="new-h">
+  <h2 id="new-h">What makes it different</h2>
+  <p>Swipe apps reward volume. Nearby Chat rewards intent: every request carries a reason, every chat opens only after a yes, and getting from a chat to an actual meet-up is built in and safe.</p>
+  <div class="map">
+    <div><h3>Tonight</h3><ul><li>Say you’re free now: “Jazz night, anyone?”</li><li>Disappears in 24 hours</li><li>“Free tonight” filter and ring on avatars</li></ul></div>
+    <div><h3>Requests with a reason</h3><ul><li>Reply to a profile prompt</li><li>The recipient sees the quote and your note</li><li>The note opens the chat when accepted</li></ul></div>
+    <div><h3>The Drop</h3><ul><li>Up to 6 people every evening at 7 pm</li><li>Ranked by shared interests</li><li>Limited on purpose, so each one gets real attention</li></ul></div>
+    <div><h3>Icebreakers</h3><ul><li>This or that, Would you rather, Rapid fire</li><li>Answered with one tap</li><li>Ends the “hey” problem</li></ul></div>
+    <div><h3>Plan cards</h3><ul><li>Suggest a public place and time</li><li>Both confirm</li><li>Share with a trusted friend; check-in reminder</li></ul></div>
+    <div><h3>Spark</h3><ul><li>Five bars that grow as you both reply</li><li>No streak punishment, no guilt</li><li>Lives in the chat header, not the inbox</li></ul></div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="lang-h">
+  <h2 id="lang-h">Colour language</h2>
+  <p>Each colour means one thing, so vibes read at a glance. Colour never carries meaning alone: every state also has a label, icon or count. Text pairs on these colours measure at least 4.5:1 (lowest 4.55:1, computed).</p>
+  <div class="lang">
+    <div><i style="background:linear-gradient(135deg,#10B981,#34D399)"></i><b>Free tonight</b><span>Pulsing mint ring · “Tonight” pill</span></div>
+    <div><i style="background:linear-gradient(135deg,#FB7185,#F97316)"></i><b>Incoming spark</b><span>Rose→coral border and glow on requests</span></div>
+    <div><i style="background:#FF5733"></i><b>Snap</b><span>Orange pill · “Hold to view · 5s”</span></div>
+    <div><i style="background:#A855F7"></i><b>Voice note</b><span>Violet with a live waveform</span></div>
+    <div><i style="background:#F59E0B"></i><b>Date plan</b><span>Champagne-gold glass card</span></div>
+    <div><i style="background:#38BDF8"></i><b>Unread</b><span>Sky-cyan count + bold preview</span></div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="map-h">
+  <h2 id="map-h">Screen map</h2>
+  <p>Three tabs on a floating glass bar. Pushed screens hide it and keep an interactive edge-swipe back.</p>
+  <div class="map">
+    <div><h3>Onboarding</h3><ul><li>Email → 6-digit code</li><li>Date of birth (18+ gate)</li><li>Name + bio → interests</li><li>City: approximate or manual · denied state</li><li>Photos (1–4)</li></ul></div>
+    <div><h3>Chats (home)</h3><ul><li>Search people and messages</li><li>Chat requests row + count</li><li>Rows: avatar, preview, time, unread</li><li>Empty · offline · slow</li></ul></div>
+    <div><h3>Requests</h3><ul><li>Incoming with quoted prompt + note</li><li>Accept / Decline with pending state</li><li>Sent: Cancel</li></ul></div>
+    <div><h3>Conversation</h3><ul><li>Pages of 30, scroll position kept</li><li>New-messages divider and pill</li><li>Sending / Sent / Failed + retry</li><li>Icebreakers · Plans · Spark</li><li>Unavailable after block</li></ul></div>
+    <div><h3>Nearby</h3><ul><li>City sheet · distance chip · Free tonight</li><li>The Drop rail</li><li>Staggered 3:4 grid; 1 column at XL</li><li>Loading · empty · denied · paused</li></ul></div>
+    <div><h3>Profile reveal</h3><ul><li>Shared-element photo transition</li><li>Gallery, Tonight, shared interests, prompts</li><li>Glass action bar: Send → Sending → Request sent</li></ul></div>
+    <div><h3>Profile & settings</h3><ul><li>Tonight status</li><li>Theme: System / Light / Dark</li><li>Photos, interests, prompts</li><li>Discovery, location, notifications, blocked, delete</li></ul></div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="tok-h">
+  <h2 id="tok-h">Design tokens</h2>
+  <p>Semantic tokens with two complete themes. Amber appears only with a number. Blur is limited to the tab bar, the profile action bar and the chat header, with solid fallbacks.</p>
+  <div class="tok">
+    <h3>Pearl Lavender (light)</h3>
+    <div class="sw-c"><i style="background:#F3F0F7"></i><span><b>bg</b><code>#F3F0F7</code></span></div>
+    <div class="sw-c"><i style="background:#FAF7FC"></i><span><b>surface</b><code>#FAF7FC</code></span></div>
+    <div class="sw-c"><i style="background:#20192B"></i><span><b>text</b><code>#20192B · 15.1:1 on bg</code></span></div>
+    <div class="sw-c"><i style="background:#625A6C"></i><span><b>text.secondary</b><code>#625A6C · 5.8:1 on bg</code></span></div>
+    <div class="sw-c"><i style="background:#5438C3"></i><span><b>accent</b><code>#5438C3 · white text 7.7:1</code></span></div>
+    <div class="sw-c"><i style="background:#F2A93B"></i><span><b>unread</b><code>#F2A93B · ink text 8.5:1</code></span></div>
+    <h3>Midnight Plum (dark)</h3>
+    <div class="sw-c"><i style="background:#14111C"></i><span><b>bg</b><code>#14111C</code></span></div>
+    <div class="sw-c"><i style="background:#211A2D"></i><span><b>surface</b><code>#211A2D</code></span></div>
+    <div class="sw-c"><i style="background:#F3EDF8"></i><span><b>text</b><code>#F3EDF8 · 16.2:1 on bg</code></span></div>
+    <div class="sw-c"><i style="background:#BAB0C7"></i><span><b>text.secondary</b><code>#BAB0C7 · 9.0:1 on bg</code></span></div>
+    <div class="sw-c"><i style="background:#B9A5FF"></i><span><b>accent</b><code>#B9A5FF · dark text 8.8:1</code></span></div>
+    <div class="sw-c"><i style="background:#F5B451"></i><span><b>unread</b><code>#F5B451 · dark text 10.2:1</code></span></div>
+  </div>
+  <div class="scroll-x"><table class="t">
+    <thead><tr><th>Token</th><th>Value</th><th>Use</th></tr></thead>
+    <tbody>
+      <tr><td>type.largeTitle</td><td>34 · 750 · −0.025em</td><td>Tab titles</td></tr>
+      <tr><td>type.body / prompt</td><td>17 regular / 20 semibold</td><td>Messages, bios / prompt answers</td></tr>
+      <tr><td>type.caption</td><td>15 · 13 · 11</td><td>Previews, times, tab labels</td></tr>
+      <tr><td>space.gutter</td><td>16 pt</td><td>Screen edges</td></tr>
+      <tr><td>size.avatar</td><td>52 inbox · 38 header · 56 request</td><td>Round avatars; accent ring means “Tonight”</td></tr>
+      <tr><td>size.target</td><td>44 pt minimum</td><td>Every control</td></tr>
+      <tr><td>radius</td><td>16 cards · 14 buttons · 20 bubbles · 28 tab bar</td><td>Shape</td></tr>
+      <tr><td>motion.spring</td><td>cubic-bezier(.34,1.4,.5,1) · 260–420 ms</td><td>Bubbles, sheets, hero; opacity only under Reduce Motion</td></tr>
+    </tbody>
+  </table></div>
+</section>
+<p class="foot">Portraits are placeholder stock photos for review only, not real users. Distances, latency and replies from non-persona profiles are simulated.</p>
+
+<script src="js/data.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/store.js"></script>
+<script src="js/screens-chat.js"></script>
+<script src="js/screens-discover.js"></script>
+<script src="js/screens-me.js"></script>
+<script src="js/sheets.js"></script>
+<script src="js/onboard.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
