@@ -18,10 +18,12 @@ const STARTER_CARDS = [
 type SpeechRecInstance = {
   lang: string;
   interimResults: boolean;
-  onresult: ((event: { results?: { 0?: { 0?: { transcript?: string } } } }) => void) | null;
-  onerror: (() => void) | null;
+  continuous: boolean;
+  onresult: ((event: { results?: ArrayLike<ArrayLike<{ transcript?: string }>> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
   start: () => void;
+  stop: () => void;
 };
 
 function AIChatInner() {
@@ -33,6 +35,8 @@ function AIChatInner() {
   const [showEmojis, setShowEmojis] = useState(false);
   const [reactingId, setReactingId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
+  const recognitionRef = useRef<SpeechRecInstance | null>(null);
   const [speechSupported] = useState(() => {
     if (typeof window === 'undefined') return false;
     const w = window as unknown as Record<string, unknown>;
@@ -57,22 +61,55 @@ function AIChatInner() {
   }, [messages, status]);
 
   const handleVoiceToggle = () => {
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    setMicError(null);
     const w = window as unknown as Record<string, new () => SpeechRecInstance>;
     const SpeechRec = w.SpeechRecognition || w.webkitSpeechRecognition;
-    if (!SpeechRec) return;
+    if (!SpeechRec) {
+      setMicError('Voice dictation is not supported in this browser.');
+      return;
+    }
 
-    const recognition = new SpeechRec();
-    recognition.lang = 'en-IN';
-    recognition.interimResults = false;
-    setIsListening(true);
+    try {
+      const recognition = new SpeechRec();
+      recognition.lang = 'en-IN';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      recognitionRef.current = recognition;
+      const baseInput = input.trim();
+      setIsListening(true);
 
-    recognition.onresult = (event) => {
-      const transcript = event.results?.[0]?.[0]?.transcript;
-      if (transcript) setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
-    };
-    recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
-    recognition.start();
+      recognition.onresult = (event) => {
+        if (!event.results) return;
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i]?.[0]?.transcript ?? '';
+        }
+        const cleaned = transcript.trim();
+        if (cleaned) setInput(baseInput ? `${baseInput} ${cleaned}` : cleaned);
+      };
+      recognition.onerror = (ev) => {
+        setIsListening(false);
+        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+          setMicError('Microphone permission blocked. Allow mic access in browser settings.');
+        } else if (ev?.error && ev.error !== 'aborted' && ev.error !== 'no-speech') {
+          setMicError(`Mic error: ${ev.error}`);
+        }
+      };
+      recognition.onend = () => {
+        setIsListening(false);
+        recognitionRef.current = null;
+      };
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      setMicError('Could not start microphone.');
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -247,6 +284,12 @@ function AIChatInner() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {micError && (
+        <p role="alert" className="fixed bottom-20 left-1/2 -translate-x-1/2 z-30 w-fit max-w-[90%] rounded-full bg-rose-600/90 px-4 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur-md">
+          {micError}
+        </p>
+      )}
 
       <form
         onSubmit={handleSubmit}
