@@ -17,7 +17,8 @@ const ITEMS: { href: string; label: string; Icon: LucideIcon; center?: boolean }
 
 /** Screens that take over the display have no navigation: the welcome page, camera, calibration and open chat threads. */
 const HIDDEN_EXACT = ['/'];
-const HIDDEN_SECTIONS = ['/record', '/persona'];
+/** The feed has its own corner orb (LiquidGlassNav) instead of this bar. */
+const HIDDEN_SECTIONS = ['/record', '/persona', '/feed'];
 /** An open thread (`/chats/<id>`) hides the nav; the inbox (`/chats`) keeps it. */
 const isHidden = (path: string) =>
   HIDDEN_EXACT.includes(path) || HIDDEN_SECTIONS.some((p) => path === p || path.startsWith(`${p}/`)) || path.startsWith('/chats/');

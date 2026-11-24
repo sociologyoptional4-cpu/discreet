@@ -1,9 +1,10 @@
 'use client';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { FeedPlayer } from '@/components/FeedPlayer';
 import { EmotionResultCard } from '@/components/EmotionResultCard';
 import { StateMessage } from '@/components/StateMessage';
+import { LiquidGlassNav } from '@/components/feed/LiquidGlassNav';
 import { fetchFeed, fetchOwnProfile, fetchProfilePosts } from '@/lib/feedData';
 import type { FeedItem, Profile, PublicPost } from '@/types/social';
 
@@ -35,8 +36,8 @@ export function FeedScreen() {
   }, [focus, topic, key]);
 
   if (!loaded || loaded.key !== key) return <StateMessage title="Loading feed…" />;
-  if ('error' in loaded) return <StateMessage title="Couldn’t load the feed" body={loaded.error} action={{ href: '/feed', label: 'Try again' }} />;
-  if (loaded.items.length === 0) return <StateMessage title="Nothing here yet" body="Be the first to post a review." action={{ href: '/record', label: 'Record a post' }} />;
+  if ('error' in loaded) return <WithNav><StateMessage title="Couldn’t load the feed" body={loaded.error} action={{ href: '/feed', label: 'Try again' }} /></WithNav>;
+  if (loaded.items.length === 0) return <WithNav><StateMessage title="Nothing here yet" body="Be the first to post a review." action={{ href: '/record', label: 'Record a post' }} /></WithNav>;
   return (
     <>
       <FeedPlayer key={key} items={loaded.items} paginate={!topic} snapshot={loaded.snapshot} />
@@ -88,6 +89,17 @@ function PostedVibe({ onClose }: { onClose: () => void }) {
         <EmotionResultCard username={mine.profile.username} posts={mine.posts} />
         <button type="button" onClick={close} className="acrylic-pill mt-3 min-h-11 w-full text-sm font-semibold">Done</button>
       </div>
+    </div>
+  );
+}
+
+/** The feed hides the app's bottom bar, so its empty and error screens still need the corner nav orb. */
+function WithNav({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden [--feed-accent-rgb:165_180_252]">
+      {children}
+      <LiquidGlassNav open={open} onOpenChange={setOpen} />
     </div>
   );
 }

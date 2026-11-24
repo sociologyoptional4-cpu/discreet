@@ -2,11 +2,10 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
-import { Play, Share2, Volume2, VolumeX } from 'lucide-react';
+import { Play } from 'lucide-react';
 import { SwipeBubbleOverlay } from '@/components/SwipeBubbleOverlay';
-import { ClayBuddy } from '@/components/chat/AvatarStickerMessage';
 import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
-import { FeedReactionDock, type FeedTag, type FeedToast } from '@/components/feed/FeedReactionDock';
+import { FollowButton, ShareOrb, SoundOrb } from '@/components/feed/FeedControls';
 import type { SocialActions } from '@/hooks/useSocialActions';
 import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
@@ -29,23 +28,28 @@ export type FeedCardProps = {
   onShare: () => void;
   onCounterTake: () => void;
   onNotInterested: () => void;
-  /** Sends a typed vibe to the creator. Null when there is no one to send it to (Incog or your own post). */
-  onVibe: ((text: string) => void) | null;
+  /** After a few seconds of uninterrupted watching the overlays fade back so the video takes over. */
+  dimmed: boolean;
   /** Every reaction (emoji tap or double-tap like), with where it happened, so the feed can burst and glow. */
   onReact: (emoji: string, x: number, y: number) => void;
-  /** Mask posts: the PiP card opens the "try another character" rail. */
-  onPip: () => void;
 };
 
-const REACTIONS = ['😍', '❤️', '😂', '🔥', '😮'] as const;
 const HEART = '❤️';
-const TOAST_MS = 3000;
-const iconBtn = 'flex size-8 items-center justify-center rounded-full bg-white/10 backdrop-blur-md focus-visible:outline-2 focus-visible:outline-white';
+/** Only R2 serves videos with CORS headers; asking any other host for CORS would stop the video loading. */
+const R2_HOST = /\.r2\.dev$/;
+const corsSafe = (src: string): boolean => {
+  try {
+    const host = new URL(src).hostname;
+    const base = process.env.NEXT_PUBLIC_R2_PUBLIC_URL;
+    return R2_HOST.test(host) || (!!base && host === new URL(base).hostname);
+  } catch {
+    return false;
+  }
+};
 const stop = (event: MouseEvent): void => event.stopPropagation();
 
 /**
- * One full-screen post with no side rail: creator, caption and a PiP card float at the top; toasts, topic pills,
- * emoji counters and one "Add a vibe" pill float at the bottom. Tap pauses, double-tap likes, long-press hides.
+ * One full-screen post, video first: only the creator, a one-line caption and three glass controls float at the top. Reactions live behind the left edge (EdgeEmojiArc). Tap pauses, double-tap likes, long-press hides.
  */
 export function FeedCard(props: FeedCardProps) {
   const { item, active, near, expanded, paused, soundOn, social, onExpand, onTogglePause, onToggleSound, onShare, onReact } = props;
@@ -57,8 +61,6 @@ export function FeedCard(props: FeedCardProps) {
   const fallback = item.transcript || item.ai_summary || 'Media unavailable';
   const [likeBurst, setLikeBurst] = useState(0);
   const [tapHeart, setTapHeart] = useState<{ id: number; x: number; y: number } | null>(null);
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [toasts, setToasts] = useState<FeedToast[]>([]);
   const toastSeq = useRef(0);
   const like = social.likeView(item);
   const creatorId = item.user_id;
@@ -66,11 +68,6 @@ export function FeedCard(props: FeedCardProps) {
   const isOwn = creatorId !== null && social.viewerId === creatorId;
   const name = item.is_incog ? (item.incog_alias ?? 'Anon') : `@${item.creator_username}`;
 
-  const toast = (emoji: string) => {
-    const id = ++toastSeq.current;
-    setToasts((list) => [...list.slice(-1), { id, who: 'You', emoji }]);
-    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), TOAST_MS);
-  };
   const react = (emoji: string, x: number, y: number) => {
     if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
       try {
@@ -84,10 +81,7 @@ export function FeedCard(props: FeedCardProps) {
       void social.toggleLike(item.id, like.liked);
       if (like.liked) return; // unliking is not a reaction
       setLikeBurst((n) => n + 1);
-    } else {
-      setCounts((c) => ({ ...c, [emoji]: (c[emoji] ?? 0) + 1 }));
     }
-    toast(emoji);
     onReact(emoji, x, y);
   };
   const doubleTapLike = (event: MouseEvent<HTMLDivElement>) => {
@@ -117,16 +111,6 @@ export function FeedCard(props: FeedCardProps) {
       onExpand();
     }
   };
-
-  const tags: FeedTag[] = [
-    ...(item.topic_entity ? [{ label: `#${item.topic_entity.replace(/\s+/g, '_').toLowerCase()}`, onClick: props.onCounterTake }] : []),
-    ...(item.emotion_tag ? [{ label: `#${item.emotion_tag}` }] : []),
-    ...(item.sentiment && item.sentiment !== 'neutral' ? [{ label: `#${item.sentiment}` }] : []),
-  ];
-  const reactions = REACTIONS.map((emoji) => emoji === HEART
-    ? { emoji, count: like.count, pressed: like.liked }
-    : { emoji, count: counts[emoji] ?? 0, pressed: (counts[emoji] ?? 0) > 0 });
-  const vibePlaceholder = props.onVibe ? 'Add a vibe…' : isOwn ? 'Your post' : 'Incog post — vibes are off';
 
   return (
     <motion.div
@@ -172,7 +156,7 @@ export function FeedCard(props: FeedCardProps) {
         ) : null}
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-gradient-to-b from-black/60 via-black/25 to-transparent" />
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[55%] bg-gradient-to-t from-black/75 via-black/30 to-transparent" />
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-black/45 to-transparent" />
 
       {paused && (
         <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 flex size-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-white/10 backdrop-blur-md"><Play className="size-8 fill-white" /></div>
@@ -183,49 +167,30 @@ export function FeedCard(props: FeedCardProps) {
         <div data-feed-progress ref={barRef} className="h-full origin-left bg-white/80" style={{ transform: 'scaleX(0)' }} />
       </div>
 
-      <header className="absolute inset-x-4 top-[calc(max(0.75rem,env(safe-area-inset-top))+0.5rem)] flex items-start gap-3" onClick={stop}>
+      <header className={`absolute inset-x-4 top-[calc(max(0.75rem,env(safe-area-inset-top))+0.5rem)] flex items-start gap-3 transition-opacity duration-700 ${props.dimmed ? 'opacity-65' : 'opacity-100'}`} onClick={stop}>
         <div className="min-w-0 flex-1 pt-0.5">
           <div className="flex items-center gap-2">
-            <span className="truncate text-[15px] font-bold drop-shadow">{name}</span>
+            {item.is_incog || !item.creator_username
+              ? <span className="truncate text-[15px] font-bold drop-shadow">{name}</span>
+              : <Link href={`/profile/${item.creator_username}`} className="truncate text-[15px] font-bold drop-shadow hover:underline">{name}</Link>}
             {follow && !isOwn && creatorId && (
-              <button type="button" onClick={() => void social.toggleFollow(creatorId, follow.following, item.id)} aria-pressed={follow.following}
-                className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold backdrop-blur-md ${follow.following ? 'border border-white/30 bg-white/10' : 'bg-white text-black'}`}>
-                {follow.following ? 'Following' : 'Follow'}
-              </button>
+              <FollowButton following={follow.following} onToggle={() => void social.toggleFollow(creatorId, follow.following, item.id)} />
             )}
-            <span className="ml-auto flex shrink-0 gap-1.5">
-              <button type="button" onClick={onToggleSound} aria-pressed={soundOn} aria-label={soundOn ? 'Mute' : 'Turn sound on'} className={iconBtn}>
-                {soundOn ? <Volume2 aria-hidden className="size-3.5" /> : <VolumeX aria-hidden className="size-3.5" />}
-              </button>
-              <button type="button" onClick={onShare} aria-label="Share this post" className={iconBtn}><Share2 aria-hidden className="size-3.5" /></button>
-            </span>
           </div>
-          <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-white/85 drop-shadow">
+          <p className="mt-1 line-clamp-1 text-[13px] leading-snug text-white/85 drop-shadow">
             {missingMedia ? fallback : item.ai_summary ?? (item.topic_entity ? `A take on ${item.topic_entity}` : 'New review')}
+            {item.topic_entity && (
+              <button type="button" onClick={props.onCounterTake} className="ml-1.5 font-semibold text-white hover:underline">#{item.topic_entity.replace(/\s+/g, '_').toLowerCase()}</button>
+            )}
           </p>
+          <div className="mt-2 flex gap-2">
+            <SoundOrb soundOn={soundOn} playing={active && !paused} onToggle={onToggleSound} />
+            <ShareOrb onShare={onShare} />
+          </div>
         </div>
-        <PipCard item={item} onPip={props.onPip} />
       </header>
-
-      <div className={`absolute inset-x-4 ${expanded ? 'bottom-[max(1rem,env(safe-area-inset-bottom))]' : 'bottom-[calc(var(--nav-h)+0.25rem)]'}`} onClick={stop} onDoubleClick={stop}>
-        {active && <FeedReactionDock toasts={toasts} tags={tags} reactions={reactions} onReact={react} onVibe={props.onVibe} vibePlaceholder={vibePlaceholder} />}
-      </div>
     </motion.div>
   );
-}
-
-/** The rounded-square picture-in-picture card: the creator's mini avatar, or a ghost for Incog posts. */
-function PipCard({ item, onPip }: { item: FeedItem; onPip: () => void }) {
-  const avatar = item.creator_avatar_id ?? item.avatar_id;
-  const inner = (
-    <span className="flex size-full items-center justify-center" style={{ background: avatar ? STUDIO_BACKDROP[avatar] : 'linear-gradient(160deg,#312e81,#0f172a)' }}>
-      {avatar && !item.is_incog ? <ClayBuddy avatarId={avatar} stickerId="wave" size={52} /> : <Emoji3D emoji="👻" size={34} />}
-    </span>
-  );
-  const cls = 'block h-20 w-16 shrink-0 overflow-hidden rounded-2xl border border-white/40 shadow-lg transition-transform active:scale-95 focus-visible:outline-2 focus-visible:outline-white';
-  if (item.mode === 'mask') return <button type="button" onClick={onPip} aria-label="Try this clip on another character" className={cls}>{inner}</button>;
-  if (!item.is_incog && item.creator_username) return <Link href={`/profile/${item.creator_username}`} aria-label={`Open @${item.creator_username}'s profile`} className={cls}>{inner}</Link>;
-  return <span aria-hidden className={cls}>{inner}</span>;
 }
 
 /** Plays only while active; neighbouring cards keep a paused, preloaded video so a swipe starts instantly. */
@@ -247,6 +212,7 @@ function PostVideo({ src, active, paused, soundOn, barRef, onFailure }: { onFail
       autoPlay={active}
       muted={!soundOn || !active}
       preload="auto"
+      crossOrigin={corsSafe(src) ? 'anonymous' : undefined}
       className="size-full object-cover"
       onTimeUpdate={(e) => {
         const bar = barRef.current;
