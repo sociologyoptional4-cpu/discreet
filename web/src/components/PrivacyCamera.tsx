@@ -170,6 +170,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   const exposureRef = useRef(0);
   const zoomRef = useRef(1);
   const zoomSupportedRef = useRef(false);
+  const mirroredRef = useRef(true);
   const lastTapAtRef = useRef(0);
   const pinchStartDistRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef(1);
@@ -188,6 +189,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   useEffect(() => { exposureRef.current = exposure; }, [exposure]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { zoomSupportedRef.current = Boolean(zoomRange); }, [zoomRange]);
+  useEffect(() => { mirroredRef.current = facing === 'user'; }, [facing]);
 
   // iOS Safari swipe-back support while in preview
   const previewHistoryRef = useRef(false);
@@ -331,6 +333,10 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
         const activeLens = lensRef.current;
 
         ctx.save();
+        if (mirroredRef.current) {
+          ctx.translate(CANVAS_W, 0);
+          ctx.scale(-1, 1);
+        }
         if (digitalScale !== 1) {
           ctx.translate(CANVAS_W / 2, CANVAS_H / 2);
           ctx.scale(digitalScale, digitalScale);
@@ -804,7 +810,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
         height={CANVAS_H}
         role="img"
         aria-label="Camera preview"
-        className={`absolute inset-0 size-full object-cover ${mirrored ? '-scale-x-100' : ''} ${mode === 'mask' ? 'invisible' : ''}`}
+        className={`absolute inset-0 size-full object-cover ${mode === 'mask' ? 'invisible' : ''}`}
       />
 
       {/* 3x3 Grid Overlay */}
