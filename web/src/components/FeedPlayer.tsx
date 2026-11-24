@@ -1,10 +1,15 @@
 'use client';
 import { LayoutGroup } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { MaskPlayback } from '@/components/MaskPlayback';
 import { FeedCard } from '@/components/FeedCard';
 import { LiquidWarpCard } from '@/components/LiquidWarpCard';
 import { SwipeBubbleOverlay } from '@/components/SwipeBubbleOverlay';
+import { useFeedEngine } from '@/hooks/useFeedEngine';
+import { trackPost } from '@/lib/telemetry';
+import { counterTakeUrl } from '@/lib/feedClient';
 import { useSocialActions } from '@/hooks/useSocialActions';
 import { findConversationWith } from '@/lib/chatData';
 import { setImmersive } from '@/lib/immersive';
@@ -16,17 +21,40 @@ const ACTIVE_RATIO = 0.6;
 const PEEK_PX = 18; // how much of the neighbouring cards shows above and below the current one
 const GAP_PX = 6;
 
-type Props = { items: FeedItem[] };
+type Props = { items: FeedItem[]; paginate: boolean; snapshot: string };
 
 /**
  * Vertical snap feed of rounded cards on a black background. One card is "active" (the one in view) and only that
  * card may own the shared WebGL canvas, so the feed never holds more than one context however far you scroll.
  * Tapping a card expands it to full screen; the navigation hides while it is open.
  */
-export function FeedPlayer({ items }: Props) {
+export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   const router = useRouter();
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const [observedId, setObservedId] = useState<string | null>(null);
+  const { items, active, index: activeIndex, select, playback, notInterested } = useFeedEngine(initial, paginate, snapshot);
+  const [maskHost, setMaskHost] = useState<HTMLDivElement | null>(null);
+  const maskBar = useRef<HTMLElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const host = document.createElement('div');
+    host.style.display = 'contents';
+    hostRef.current = host;
+    // The microtask avoids scheduling a second synchronous render during passive effect setup.
+    queueMicrotask(() => { if (hostRef.current === host) setMaskHost(host); });
+    return () => { hostRef.current = null; host.remove(); };
+  }, []);
+  useLayoutEffect(() => {
+    if (!maskHost || active?.mode !== 'mask') return;
+    const card = scrollerRef.current?.querySelector<HTMLElement>(`[data-post-id="${CSS.escape(active.id)}"]`);
+    const slot = card?.querySelector<HTMLElement>('[data-mask-slot]');
+    if (!slot) return;
+    // Keep React's portal target and WebGL context stable when its containing card changes.
+    const host = hostRef.current;
+    if (!host) return;
+    slot.appendChild(host);
+    maskBar.current = card?.querySelector<HTMLElement>('[data-feed-progress]') ?? null;
+    return () => { host.remove(); maskBar.current = null; };
+  }, [maskHost, active]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pausedId, setPausedId] = useState<string | null>(null);
   const [soundOn, setSoundOn] = useState(false); // browsers allow sound only after a tap, so the feed starts muted
@@ -35,8 +63,7 @@ export function FeedPlayer({ items }: Props) {
   const previousIndex = useRef<number | null>(null);
   const social = useSocialActions();
 
-  const activeId = observedId !== null && items.some((p) => p.id === observedId) ? observedId : (items[0]?.id ?? null);
-  const activeIndex = items.findIndex((p) => p.id === activeId);
+  const activeId = active?.id;
   const expanded = expandedId !== null;
 
   useEffect(() => {
@@ -50,18 +77,17 @@ export function FeedPlayer({ items }: Props) {
   useEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    scroller.scrollTop = 0; // a new list always starts on its first card
     const observer = new IntersectionObserver(
       (entries) => {
         const visible = entries.find((e) => e.isIntersecting && e.intersectionRatio >= ACTIVE_RATIO);
         const id = visible?.target.getAttribute('data-post-id');
-        if (id) setObservedId(id);
+        if (id) select(id);
       },
       { root: scroller, threshold: [ACTIVE_RATIO] },
     );
     scroller.querySelectorAll('[data-post-id]').forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [items]);
+  }, [items, select]);
 
   useEffect(() => {
     setImmersive('feed-card', expanded);
@@ -85,6 +111,7 @@ export function FeedPlayer({ items }: Props) {
     // Incog posts never name their creator, not even in the share text.
     const title = item.is_incog || !item.creator_username ? 'A review on Vybe' : `A review by @${item.creator_username} on Vybe`;
     const result = await handleShare({ title, text: item.ai_summary ?? undefined, url });
+    if (result === 'copied' || result === 'shared') trackPost(item.id, 'share');
     if (result === 'copied') flash('Link copied');
     else if (result === 'failed') flash('Could not share this post');
   };
@@ -95,14 +122,20 @@ export function FeedPlayer({ items }: Props) {
     try {
       const session = await ensureSession();
       const existing = await findConversationWith(session.user.id, item.user_id);
+      if (existing?.status !== 'accepted') trackPost(item.id, 'profile_visit');
       router.push(existing?.status === 'accepted' ? `/chats/${existing.id}` : `/profile/${item.creator_username}`);
     } catch {
+      trackPost(item.id, 'profile_visit');
       router.push(`/profile/${item.creator_username}`);
     }
   };
 
   return (
     <div className="relative h-dvh w-full bg-black text-white">
+      {maskHost && active?.mode === 'mask' && createPortal(
+        <MaskPlayback avatarId={active.avatar_id} motionUrl={active.motion_url} audioUrl={active.media_url} soundOn={soundOn} paused={pausedId === active.id} barRef={maskBar}
+          onPlayback={playback} />, maskHost,
+      )}
       <LayoutGroup>
         <div
           ref={scrollerRef}
@@ -116,6 +149,9 @@ export function FeedPlayer({ items }: Props) {
             <article
               key={item.id}
               data-post-id={item.id}
+              onPlayingCapture={() => { if (item.id === activeId) playback(true); }}
+              onPauseCapture={() => { if (item.id === activeId) playback(false); }}
+              onWaitingCapture={() => { if (item.id === activeId) playback(false); }}
               aria-posinset={index + 1}
               aria-setsize={items.length}
               className="relative w-full snap-center snap-always"
@@ -134,6 +170,8 @@ export function FeedPlayer({ items }: Props) {
                 onCollapse={() => setExpandedId(null)}
                 onTogglePause={() => setPausedId((p) => (p === item.id ? null : item.id))}
                 onToggleSound={() => setSoundOn((on) => !on)}
+                onCounterTake={() => router.push(counterTakeUrl(item.topic_entity))}
+                onNotInterested={() => { notInterested(item); flash('Not interested'); }}
                 onShare={() => void share(item)}
                 onMessage={() => void message(item)}
               />

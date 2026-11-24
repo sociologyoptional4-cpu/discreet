@@ -12,6 +12,7 @@ type Props = {
   motionUrl: string | null;
   audioUrl: string;
   soundOn: boolean;
+  onPlayback?: (playing: boolean) => void;
   /** Freezes the clip (audio and avatar) while true. */
   paused?: boolean;
   /** An element whose scaleX is kept equal to how far through the clip we are (a hairline progress bar). */
@@ -23,7 +24,7 @@ type Props = {
  * It owns the only WebGL canvas on the feed, so mount a single instance (the active card) at a time.
  * Audio keeps its clock while muted, so lip-sync is unchanged when the sound is off.
  */
-export function MaskPlayback({ avatarId, motionUrl, audioUrl, soundOn, paused = false, barRef }: Props) {
+export function MaskPlayback({ avatarId, motionUrl, audioUrl, soundOn, paused = false, barRef, onPlayback }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const currentFrameRef = useRef<MotionFrame | null>(null);
   const [loaded, setLoaded] = useState<{ url: string; track: MotionTrackFile | null } | null>(null);
@@ -40,6 +41,7 @@ export function MaskPlayback({ avatarId, motionUrl, audioUrl, soundOn, paused = 
   }, [motionUrl]);
 
   useEffect(() => {
+    currentFrameRef.current = null;
     if (!track) return;
     let raf = 0;
     const tick = () => {
@@ -65,7 +67,7 @@ export function MaskPlayback({ avatarId, motionUrl, audioUrl, soundOn, paused = 
   return (
     <div className="relative flex size-full items-center">
       <AvatarStage fill avatarId={avatarId ?? track?.avatarId ?? 'cyber_monk'} currentFrameRef={currentFrameRef} />
-      <audio ref={audioRef} src={resolveMediaUrl(audioUrl)} loop autoPlay playsInline preload="auto" muted={!soundOn} />
+      <audio ref={audioRef} onPlaying={() => onPlayback?.(true)} onPause={() => onPlayback?.(false)} onWaiting={() => onPlayback?.(false)} src={resolveMediaUrl(audioUrl)} loop autoPlay playsInline preload="auto" muted={!soundOn} />
       {!track && (
         <p role="status" className="absolute left-1/2 top-1/3 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white/80">
           {failed ? 'Couldn’t load this 3D clip' : 'Loading 3D clip…'}

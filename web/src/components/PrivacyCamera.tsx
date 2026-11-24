@@ -50,11 +50,11 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     setImmersive('camera', true);
     return () => setImmersive('camera', false);
   }, []);
-  const { videoRef, audioStream, phase: camPhase, facing, notice: camNotice, flip: flipCamera, retry: retryCamera } = useCameraStream();
+  const [mode, setMode] = useState<PrivacyMode>('mask');
+  const { videoRef, audioStream, phase: camPhase, facing, notice: camNotice, flip: flipCamera, retry: retryCamera } = useCameraStream({mode});
   const recorder = usePrivacyRecorder({ canvasRef, audioStream });
 
   // UI state. Only `faceLocked` is ever set from the render loop, and only when it actually flips.
-  const [mode, setMode] = useState<PrivacyMode>('mask');
   const [legacyWanted, setLegacyWanted] = useState(false); // blur/shadow/noface models load only once one of those modes is chosen
   const [maskPayload, setMaskPayload] = useState<MaskRecordingPayload | null>(null);
   const [maskRecording, setMaskRecording] = useState(false);

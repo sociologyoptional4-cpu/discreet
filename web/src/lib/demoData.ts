@@ -207,7 +207,7 @@ export function demoToggleFollow(creatorId: string, currentlyFollowing: boolean)
   else followed.add(creatorId);
 }
 
-export type DemoNewPost = { mode: PrivacyMode; avatarId: AvatarId | null; mediaUrl: string; motion: MotionTrackFile | null; durationSec: number; isIncog: boolean; alias: string | null };
+export type DemoNewPost = { topic?: string | null; mode: PrivacyMode; avatarId: AvatarId | null; mediaUrl: string; motion: MotionTrackFile | null; durationSec: number; isIncog: boolean; alias: string | null };
 
 /** Adds the viewer's own post to the demo feed, newest first. */
 export function demoAddPost(input: DemoNewPost): string {
@@ -218,7 +218,7 @@ export function demoAddPost(input: DemoNewPost): string {
   const summary = 'Your new post. In the real app, speech-to-text and AI add the topic and summary within seconds.';
   allPosts().push({
     id, user_id: input.isIncog ? null : me.id, mode: input.mode, avatar_id: input.avatarId, media_url: input.mediaUrl, motion_url: motionUrl, duration_sec: input.durationSec,
-    is_incog: input.isIncog, incog_alias: input.alias, transcript: summary, topic_entity: 'my review', sentiment: 'positive', emotion_tag: 'joy', ai_summary: summary, likes_count: 0,
+    is_incog: input.isIncog, incog_alias: input.alias, transcript: summary, topic_entity: input.topic ?? 'my review', sentiment: 'positive', emotion_tag: 'joy', ai_summary: summary, likes_count: 0,
     expiry_tier: input.isIncog ? '1d' : '1w', expires_at: new Date(Date.now() + 7 * DAY_MS).toISOString(), created_at: new Date().toISOString(),
     creator_username: input.isIncog ? null : me.username, creator_avatar_id: input.isIncog ? null : me.avatar_id, creator_followers_count: input.isIncog ? null : me.followers_count,
     category: 'general', key_points: [],

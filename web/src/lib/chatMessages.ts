@@ -1,13 +1,23 @@
 import type { PrivacyMode } from '../types/privacy.ts';
 
-export type DeliveryStatus = 'sending' | 'sent' | 'failed';
+import type { ServerStatus } from '../types/chat.ts';
+
+export type DeliveryStatus = 'queued_offline' | 'sending' | 'failed' | ServerStatus;
 
 /** A row of the `messages` table, as the server stores and broadcasts it. */
 export type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  type: 'text' | 'snap' | 'story_reply';
+  type: 'text' | 'snap' | 'story_reply' | 'system_alert';
+  client_msg_id?: string;
+  r2_key?: string | null;
+  motion_r2_key?: string | null;
+  view_count?: number;
+  max_views?: number;
+  replayed_by_recipient?: boolean;
+  is_saved?: boolean;
+  status?: ServerStatus;
   content: string | null;
   snap_mode: PrivacyMode | null;
   avatar_id: string | null;
@@ -20,7 +30,7 @@ export type MessageRow = {
 };
 
 /** A message as the screen shows it: the row plus whether it has reached the server. */
-export type ChatMessage = MessageRow & { status: DeliveryStatus };
+export type ChatMessage = Omit<MessageRow, 'status'> & { status: DeliveryStatus };
 
 const byTime = (a: ChatMessage, b: ChatMessage): number => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1);
 
@@ -31,13 +41,13 @@ const byTime = (a: ChatMessage, b: ChatMessage): number => (a.created_at < b.cre
  */
 export function mergeMessages(current: readonly ChatMessage[], incoming: readonly MessageRow[]): ChatMessage[] {
   const byId = new Map<string, ChatMessage>(current.map((m) => [m.id, m]));
-  for (const row of incoming) byId.set(row.id, { ...row, status: 'sent' });
+  for (const row of incoming) byId.set(row.id, { ...row, status: row.status ?? 'sent' });
   return [...byId.values()].sort(byTime);
 }
 
 /** Applies a change to one message (a snap being opened). Unknown ids are ignored: a change never invents a message. */
 export function applyMessageUpdate(current: readonly ChatMessage[], row: MessageRow): ChatMessage[] {
-  return current.map((m) => (m.id === row.id ? { ...row, status: m.status === 'sent' ? 'sent' : m.status } : m));
+  return current.map((m) => (m.id === row.id ? { ...row, status: row.status ?? m.status } : m));
 }
 
 /** Changes one message's delivery status. */

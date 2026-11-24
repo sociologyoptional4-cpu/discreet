@@ -2,7 +2,7 @@ import { toConversationItem, type ConversationItem, type ConversationRow } from 
 import { supabase } from '@/lib/supabase';
 
 const COLUMNS =
-  'id, user_a, user_b, status, initiator_id, request_note, last_message_at, a:users!user_a(id, username, avatar_id), b:users!user_b(id, username, avatar_id)';
+  'id, user_a, user_b, status, initiator_id, request_note, last_message_at, user_a_unread, user_b_unread, streak_count, streak_updated_at, a:users!user_a(id, username, avatar_id), b:users!user_b(id, username, avatar_id)';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UNIQUE_VIOLATION = '23505';
 

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { HoldToViewSnap } from '@/components/HoldToViewSnap';
 import { PrivacyCamera } from '@/components/PrivacyCamera';
 import { StateMessage } from '@/components/StateMessage';
+import type { SnapView } from '@/types/chat';
 import { useChatThread, type ChatMessage } from '@/hooks/useChatThread';
 import { fetchConversation } from '@/lib/chatData';
 import type { ConversationItem } from '@/lib/conversations';
@@ -43,11 +44,11 @@ export function ChatThreadScreen({ conversationId }: { conversationId: string })
       />
     );
   }
-  return <Thread conversationId={conversationId} viewerId={viewerId} other={conversation.other} />;
+  return <Thread key={conversationId + viewerId} conversationId={conversationId} viewerId={viewerId} other={conversation.other} />;
 }
 
 function Thread({ conversationId, viewerId, other }: { conversationId: string; viewerId: string; other: ConversationItem['other'] }) {
-  const { messages, isLoading, hasMore, error, loadOlderMessages, sendText, sendSnap, retryMessage, markSnapViewed } = useChatThread(conversationId, viewerId);
+  const { messages, isLoading, hasMore, error, loadOlderMessages, sendText, sendSnap, retryMessage, openSnap, canReplay, signalCapture, type, setSaved, setRetention, retention, peerTyping, peerPresent, streakCount, streakStatus } = useChatThread(conversationId, viewerId);
   const [text, setText] = useState('');
   const [camera, setCamera] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -67,19 +68,19 @@ function Thread({ conversationId, viewerId, other }: { conversationId: string; v
 
   return (
     <div className="mx-auto flex h-dvh w-full max-w-xl flex-col bg-[#0A0A0A] text-white">
-      <header className="flex items-center gap-3 border-b border-white/15 px-4 py-3">
+      <header title={`Retention: ${retention}. Double-click to toggle. Streak: ${streakCount} (${streakStatus}).`} onDoubleClick={() => void setRetention(retention === '24h' ? 'after_viewing' : '24h')} onKeyDown={e => { if (e.shiftKey && e.key === 'Enter') void setRetention(retention === '24h' ? 'after_viewing' : '24h'); }} tabIndex={0} className="flex items-center gap-3 border-b border-white/15 px-4 py-3">
         <Link href="/chats" aria-label="Back to chats" className="min-h-11 min-w-11 py-2 text-sm">Back</Link>
         <Link href={`/profile/${other.username}`} className="font-semibold">@{other.username}</Link>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3" role="log" aria-label="Messages">
+      <div className="flex-1 overflow-y-auto px-4 py-3" role="log" aria-label={peerTyping ? 'Messages, other participant typing' : peerPresent ? 'Messages, other participant in chat' : 'Messages'}>
         {hasMore && <button type="button" onClick={() => void loadOlderMessages()} className="mb-3 min-h-11 w-full rounded border border-white/20 text-sm">Load older messages</button>}
         {isLoading && <p className="text-sm text-white/60">Loading…</p>}
         {!isLoading && messages.length === 0 && <p className="text-sm text-white/60">Say hi, or send a snap.</p>}
         <ul className="flex flex-col gap-2">
           {messages.map((m) => (
             <li key={m.id} className={`flex flex-col ${m.sender_id === viewerId ? 'items-end' : 'items-start'}`}>
-              <MessageBody message={m} mine={m.sender_id === viewerId} onViewed={(id) => void markSnapViewed(id)} />
+              <MessageBody message={m} mine={m.sender_id === viewerId} onOpen={openSnap} canReplay={canReplay(m.id)} onSignal={signalCapture} onSave={() => void setSaved(m)} />
               {m.sender_id === viewerId && <DeliveryLine message={m} onRetry={() => void retryMessage(m.id)} />}
             </li>
           ))}
@@ -92,7 +93,7 @@ function Thread({ conversationId, viewerId, other }: { conversationId: string; v
         <button type="button" onClick={() => setCamera(true)} className="min-h-11 rounded border border-white/30 px-3 text-sm">Camera</button>
         <input
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => { setText(e.target.value); type(); }}
           maxLength={2000}
           placeholder="Message"
           aria-label="Message"
@@ -114,8 +115,8 @@ function Thread({ conversationId, viewerId, other }: { conversationId: string; v
   );
 }
 
-function MessageBody({ message, mine, onViewed }: { message: ChatMessage; mine: boolean; onViewed: (id: string) => void }) {
-  if (message.type === 'snap') return <HoldToViewSnap message={message} isOwnMessage={mine} onViewed={onViewed} />;
+function MessageBody({ message, mine, onOpen, canReplay, onSignal, onSave }: { message: ChatMessage; mine: boolean; onOpen: (id: string) => Promise<SnapView | null>; canReplay: boolean; onSignal: (reason: 'key' | 'hidden') => void; onSave: () => void }) {
+  if (message.type === 'snap') return <HoldToViewSnap message={message} isOwnMessage={mine} onOpen={onOpen} canReplay={canReplay} onSignal={onSignal} />;
   const bubble = `max-w-[80%] break-words rounded-2xl px-3 py-2 text-sm ${mine ? 'bg-white text-[#0A0A0A]' : 'bg-white/15'}`;
   if (message.type === 'story_reply') {
     return (
@@ -125,12 +126,12 @@ function MessageBody({ message, mine, onViewed }: { message: ChatMessage; mine: 
       </div>
     );
   }
-  return <div className={bubble}>{message.content}</div>;
+  return <div className={bubble} role={message.type === 'text' ? 'button' : undefined} tabIndex={message.type === 'text' ? 0 : undefined} aria-pressed={message.type === 'text' ? !!message.is_saved : undefined} title={message.type === 'text' ? (message.is_saved ? 'Tap to unsave' : 'Tap to save') : undefined} onClick={onSave} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSave(); } }}>{message.content}</div>;
 }
 
 function DeliveryLine({ message, onRetry }: { message: ChatMessage; onRetry: () => void }) {
   if (message.status === 'failed') {
     return <button type="button" onClick={onRetry} className="mt-1 min-h-11 text-xs font-semibold text-red-500">Failed — Tap to retry</button>;
   }
-  return <span className="mt-0.5 text-[11px] text-white/50">{message.status === 'sending' ? 'Sending…' : message.viewed_at ? 'Seen' : 'Sent'}</span>;
+  return <span className="mt-0.5 text-[11px] text-white/50">{message.is_saved ? 'Saved' : message.status === 'queued_offline' ? 'Queued' : message.status === 'sending' ? 'Sending…' : message.viewed_at ? 'Seen' : message.status === 'delivered' ? 'Delivered' : 'Sent'}</span>;
 }

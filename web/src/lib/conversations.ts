@@ -11,6 +11,10 @@ export type ConversationRow = {
   initiator_id: string;
   request_note: string | null;
   last_message_at: string;
+  user_a_unread?: number;
+  user_b_unread?: number;
+  streak_count?: number;
+  streak_updated_at?: string | null;
   a: Embedded;
   b: Embedded;
 };
@@ -21,6 +25,8 @@ export type ConversationItem = {
   initiatorId: string;
   requestNote: string | null;
   lastMessageAt: string;
+  unread: number;
+  streak: number;
   /** The other person in the conversation. */
   other: { id: string; username: string; avatarId: string };
   /** A request somebody else sent to the viewer, waiting for their answer. */
@@ -40,6 +46,8 @@ export function toConversationItem(row: ConversationRow, viewerId: string): Conv
     initiatorId: row.initiator_id,
     requestNote: row.request_note,
     lastMessageAt: row.last_message_at,
+    unread: (row.user_a === viewerId ? row.user_a_unread : row.user_b_unread) ?? 0,
+    streak: row.streak_updated_at && Date.now() - Date.parse(row.streak_updated_at) < 86400000 ? row.streak_count ?? 0 : 0,
     other: { id: otherId, username: person?.username ?? 'unknown', avatarId: person?.avatar_id ?? 'cyber_monk' },
     incoming: row.status === 'pending' && row.initiator_id !== viewerId,
   };

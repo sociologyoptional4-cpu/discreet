@@ -1,6 +1,8 @@
 'use client';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
+import { stopCameraStreams } from '@/lib/cameraCleanup';
+
 export type CameraPhase = 'requesting' | 'ready' | 'denied' | 'unsupported' | 'error';
 export type Facing = 'user' | 'environment';
 
@@ -27,7 +29,7 @@ const isPermissionError = (e: unknown): boolean =>
   e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError' || e.name === 'SecurityError');
 
 /** Camera (and, unless `audio: false`, microphone) permissions, front/rear flip, and guaranteed track shutdown on unmount. */
-export function useCameraStream({ audio: wantAudio = true }: { audio?: boolean } = {}): CameraStream {
+export function useCameraStream({ audio: wantAudio = true, mode }: { audio?: boolean; mode?: string } = {}): CameraStream {
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -40,7 +42,7 @@ export function useCameraStream({ audio: wantAudio = true }: { audio?: boolean }
 
   const stopAll = useCallback(() => {
     generationRef.current += 1;
-    [videoStreamRef.current, audioStreamRef.current].forEach((s) => s?.getTracks().forEach((t) => t.stop()));
+    stopCameraStreams(videoStreamRef.current, audioStreamRef.current);
     videoStreamRef.current = null;
     audioStreamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -82,7 +84,7 @@ export function useCameraStream({ audio: wantAudio = true }: { audio?: boolean }
       try {
         await attach(video);
       } catch {
-        if (gen === generationRef.current) setPhase('error');
+        if (gen === generationRef.current) { stopAll(); setPhase('error'); }
         return;
       }
       if (gen !== generationRef.current) return;
@@ -97,28 +99,14 @@ export function useCameraStream({ audio: wantAudio = true }: { audio?: boolean }
   const flip = useCallback(async () => {
     const next: Facing = facingRef.current === 'user' ? 'environment' : 'user';
     const prev = facingRef.current;
-    const gen = generationRef.current;
     setNotice(null);
-    // Some phones cannot open a second camera while one is active, so release the old one first.
-    videoStreamRef.current?.getTracks().forEach((t) => t.stop());
-    const open = async (mode: Facing): Promise<boolean> => {
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(mode), audio: false });
-        if (gen !== generationRef.current) { s.getTracks().forEach((t) => t.stop()); return false; }
-        videoStreamRef.current = s;
-        await attach(s);
-        facingRef.current = mode;
-        setFacing(mode);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    if (await open(next)) return;
-    if (gen !== generationRef.current) return;
-    setNotice('Could not switch cameras on this device.');
-    if (!(await open(prev)) && gen === generationRef.current) setPhase('error');
-  }, [attach]);
+    setPhase('requesting');
+    await start(next);
+    if (facingRef.current !== next && videoRef.current) {
+      setNotice('Could not switch cameras on this device.');
+      await start(prev);
+    }
+  }, [start]);
 
   const retry = useCallback(() => {
     setPhase('requesting');
@@ -128,12 +116,12 @@ export function useCameraStream({ audio: wantAudio = true }: { audio?: boolean }
 
   useEffect(() => {
     // Deferred so React's dev double-mount cancels the first attempt instead of prompting for permission twice.
-    const timer = setTimeout(() => void start('user'), 0);
+    const timer = setTimeout(() => { setPhase('requesting'); void start(facingRef.current); }, 0);
     return () => {
       clearTimeout(timer);
       stopAll(); // releases camera and microphone on unmount
     };
-  }, [start, stopAll]);
+  }, [start, stopAll, mode]);
 
   return { videoRef, audioStream, phase, facing, notice, flip, retry };
 }
