@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowUp, Mic, MicOff, RotateCcw, Smile } from 'lucide-react';
+import { ArrowLeft, ArrowUp, LoaderCircle, Mic, RotateCcw, Smile, Square } from 'lucide-react';
 import { Emoji3D, ReactionPill } from '@/components/chat/EmojiReactionSystem';
 import { ALL_EMOJIS } from '@/lib/chat/messageFormat';
 import { useAIChat } from '@/hooks/useAIChat';
+import { useVoiceInput } from '@/hooks/useVoiceInput';
 
 const STARTER_CARDS = [
   '🎬 Help me script a 15s product review',
@@ -15,33 +16,17 @@ const STARTER_CARDS = [
   '🎲 Play a quick 20-questions game',
 ];
 
-type SpeechRecInstance = {
-  lang: string;
-  interimResults: boolean;
-  continuous: boolean;
-  onresult: ((event: { results?: ArrayLike<ArrayLike<{ transcript?: string }>> }) => void) | null;
-  onerror: ((event: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-};
+const formatTimer = (sec: number): string => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 
 function AIChatInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { messages, status, hydrated, sendMessage, toggleReaction, clearChat } = useAIChat();
+  const { isRecording, isTranscribing, durationSec, error: micError, startRecording, stopRecording } = useVoiceInput();
 
   const [input, setInput] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
   const [reactingId, setReactingId] = useState<string | null>(null);
-  const [isListening, setIsListening] = useState(false);
-  const [micError, setMicError] = useState<string | null>(null);
-  const recognitionRef = useRef<SpeechRecInstance | null>(null);
-  const [speechSupported] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    const w = window as unknown as Record<string, unknown>;
-    return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
-  });
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const promptHandledRef = useRef(false);
@@ -60,61 +45,21 @@ function AIChatInner() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, status]);
 
-  const handleVoiceToggle = () => {
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-      return;
-    }
-
-    setMicError(null);
-    const w = window as unknown as Record<string, new () => SpeechRecInstance>;
-    const SpeechRec = w.SpeechRecognition || w.webkitSpeechRecognition;
-    if (!SpeechRec) {
-      setMicError('Voice dictation is not supported in this browser.');
-      return;
-    }
-
-    try {
-      const recognition = new SpeechRec();
-      recognition.lang = 'en-IN';
-      recognition.interimResults = true;
-      recognition.continuous = false;
-      recognitionRef.current = recognition;
-      const baseInput = input.trim();
-      setIsListening(true);
-
-      recognition.onresult = (event) => {
-        if (!event.results) return;
-        let transcript = '';
-        for (let i = 0; i < event.results.length; i++) {
-          transcript += event.results[i]?.[0]?.transcript ?? '';
-        }
-        const cleaned = transcript.trim();
-        if (cleaned) setInput(baseInput ? `${baseInput} ${cleaned}` : cleaned);
-      };
-      recognition.onerror = (ev) => {
-        setIsListening(false);
-        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
-          setMicError('Microphone permission blocked. Allow mic access in browser settings.');
-        } else if (ev?.error && ev.error !== 'aborted' && ev.error !== 'no-speech') {
-          setMicError(`Mic error: ${ev.error}`);
-        }
-      };
-      recognition.onend = () => {
-        setIsListening(false);
-        recognitionRef.current = null;
-      };
-      recognition.start();
-    } catch {
-      setIsListening(false);
-      setMicError('Could not start microphone.');
+  const handleVoiceToggle = async () => {
+    if (isTranscribing) return;
+    if (isRecording) {
+      const transcript = await stopRecording();
+      if (transcript) {
+        setInput((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
+      }
+    } else {
+      await startRecording();
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || status !== 'idle') return;
     const text = input;
     setInput('');
     void sendMessage(text);
@@ -285,7 +230,14 @@ function AIChatInner() {
         )}
       </AnimatePresence>
 
-      {micError && (
+      {isRecording && (
+        <div role="status" className="fixed bottom-20 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-full bg-rose-600/95 px-3.5 py-1.5 text-xs font-semibold tabular-nums text-white shadow-lg backdrop-blur-md">
+          <span aria-hidden className="size-2 rounded-full bg-white animate-pulse" />
+          <span>Recording {formatTimer(durationSec)} · Tap stop when done</span>
+        </div>
+      )}
+
+      {!isRecording && micError && (
         <p role="alert" className="fixed bottom-20 left-1/2 -translate-x-1/2 z-30 w-fit max-w-[90%] rounded-full bg-rose-600/90 px-4 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur-md">
           {micError}
         </p>
@@ -311,28 +263,33 @@ function AIChatInner() {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask anything..."
+          placeholder={isTranscribing ? 'Transcribing...' : 'Ask anything...'}
           className="flex-1 bg-transparent px-2 text-[14.5px] text-slate-900 placeholder:text-slate-400 focus:outline-none"
         />
 
-        {speechSupported && (
-          <button
-            type="button"
-            onClick={handleVoiceToggle}
-            aria-label="Voice input"
-            className={`h-9 w-9 rounded-full flex items-center justify-center transition ${
-              isListening
-                ? 'bg-rose-500 text-white animate-pulse'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => void handleVoiceToggle()}
+          disabled={isTranscribing}
+          aria-label={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing' : 'Voice input'}
+          className={`h-9 w-9 rounded-full flex items-center justify-center transition ${
+            isRecording
+              ? 'bg-rose-500 text-white animate-pulse'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-60'
+          }`}
+        >
+          {isTranscribing ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : isRecording ? (
+            <Square className="h-3.5 w-3.5 fill-current" />
+          ) : (
+            <Mic className="h-4 w-4" />
+          )}
+        </button>
 
         <button
           type="submit"
-          disabled={!input.trim() || status !== 'idle'}
+          disabled={!input.trim() || status !== 'idle' || isRecording || isTranscribing}
           aria-label="Send message"
           className="h-9 w-9 rounded-full bg-gradient-to-tr from-indigo-500 to-cyan-400 text-white flex items-center justify-center shadow-md disabled:opacity-40 active:scale-95 transition"
         >
