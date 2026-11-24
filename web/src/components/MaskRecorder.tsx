@@ -38,6 +38,8 @@ export type MaskRecorderProps = {
   /** Controls shown either side of the record button. */
   leading?: ReactNode;
   trailing?: ReactNode;
+  /** Allows recording in Audio + 3D Avatar mode even if no physical camera is available. */
+  audioOnly?: boolean;
 };
 
 const round1 = (v: number): number => Math.round(v * 10) / 10;
@@ -45,7 +47,7 @@ const round3 = (v: number): number => Math.round(v * 1000) / 1000;
 const pickAudioMime = (): string | undefined => AUDIO_MIME_ORDER.find((t) => MediaRecorder.isTypeSupported(t));
 const formatTime = (s: number): string => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRecordingChange, mirrored = false, initialAvatar, onAvatarChange, onEmotionChange, leading, trailing }: MaskRecorderProps) {
+export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRecordingChange, mirrored = false, initialAvatar, onAvatarChange, onEmotionChange, leading, trailing, audioOnly = false }: MaskRecorderProps) {
   const [avatarId, setAvatarId] = useState<AvatarId>(initialAvatar ?? 'cyber_monk');
   const [models, setModels] = useState<ModelsState>('loading');
   const [modelsAttempt, setModelsAttempt] = useState(0);
@@ -244,7 +246,7 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
     };
   }, []);
 
-  const ready = models === 'ready' && audioStream !== null;
+  const ready = (models === 'ready' || audioOnly) && audioStream !== null;
 
   return (
     <div className="absolute inset-0">

@@ -1,44 +1,68 @@
 'use client';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-
 import { stopCameraStreams } from '@/lib/cameraCleanup';
 
-export type CameraPhase = 'requesting' | 'ready' | 'denied' | 'unsupported' | 'error';
+export type CameraPhase = 'requesting' | 'ready' | 'audio-only' | 'denied' | 'unsupported' | 'error';
 export type Facing = 'user' | 'environment';
+export type ZoomRange = { min: number; max: number; step: number } | null;
 
 export type CameraStream = {
-  /** Attach to the hidden `<video>`. It receives video only; the raw frames never leave this element and the canvas loop. */
   videoRef: RefObject<HTMLVideoElement | null>;
-  /** Microphone track(s) only, handed to the recorder. */
   audioStream: MediaStream | null;
   phase: CameraPhase;
   facing: Facing;
   notice: string | null;
+  devices: MediaDeviceInfo[];
+  selectedDeviceId: string | null;
+  zoomRange: ZoomRange;
+  hasTorch: boolean;
   flip: () => Promise<void>;
   retry: () => Promise<void>;
+  selectDevice: (deviceId: string) => Promise<void>;
+  startAudioOnly: () => Promise<void>;
+  setHardwareZoom: (level: number) => Promise<boolean>;
+  setTorch: (enabled: boolean) => Promise<boolean>;
 };
 
-const videoConstraints = (facing: Facing): MediaTrackConstraints => ({
-  facingMode: { ideal: facing },
-  width: { ideal: 1280 },
-  height: { ideal: 720 },
-  frameRate: { ideal: 30 },
-});
+const RESOLUTION_LADDER: Array<(facing: Facing, deviceId?: string | null) => MediaTrackConstraints> = [
+  (facing, deviceId) => ({
+    ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: facing } }),
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
+    frameRate: { ideal: 30 },
+  }),
+  (facing, deviceId) => ({
+    ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: facing } }),
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    frameRate: { ideal: 30 },
+  }),
+  (facing, deviceId) => ({
+    ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: facing } }),
+    width: { ideal: 640 },
+    height: { ideal: 480 },
+  }),
+];
 
 const isPermissionError = (e: unknown): boolean =>
   e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError' || e.name === 'SecurityError');
 
-/** Camera (and, unless `audio: false`, microphone) permissions, front/rear flip, and guaranteed track shutdown on unmount. */
 export function useCameraStream({ audio: wantAudio = true, mode }: { audio?: boolean; mode?: string } = {}): CameraStream {
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
-  const generationRef = useRef(0); // bumped on every stop so a late getUserMedia result is discarded and its tracks stopped
+  const generationRef = useRef(0);
   const facingRef = useRef<Facing>('user');
+  const deviceIdRef = useRef<string | null>(null);
+
   const [phase, setPhase] = useState<CameraPhase>('requesting');
   const [facing, setFacing] = useState<Facing>('user');
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [zoomRange, setZoomRange] = useState<ZoomRange>(null);
+  const [hasTorch, setHasTorch] = useState(false);
 
   const stopAll = useCallback(() => {
     generationRef.current += 1;
@@ -46,6 +70,18 @@ export function useCameraStream({ audio: wantAudio = true, mode }: { audio?: boo
     videoStreamRef.current = null;
     audioStreamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
+    setZoomRange(null);
+    setHasTorch(false);
+  }, []);
+
+  const refreshDevices = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const list = await navigator.mediaDevices.enumerateDevices();
+      setDevices(list.filter((d) => d.kind === 'videoinput'));
+    } catch {
+      /* ignore enumeration errors */
+    }
   }, []);
 
   const attach = useCallback(async (stream: MediaStream) => {
@@ -55,73 +91,203 @@ export function useCameraStream({ audio: wantAudio = true, mode }: { audio?: boo
     await el.play();
   }, []);
 
+  const acquireWithFallback = useCallback(
+    async (targetFacing: Facing, deviceId: string | null): Promise<MediaStream> => {
+      const audioConstraint = wantAudio ? { echoCancellation: true, noiseSuppression: true } : false;
+      let lastErr: unknown;
+
+      for (const buildVideo of RESOLUTION_LADDER) {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            video: buildVideo(targetFacing, deviceId),
+            audio: audioConstraint,
+          });
+        } catch (err) {
+          lastErr = err;
+          if (isPermissionError(err)) throw err;
+        }
+      }
+
+      // Final bare fallback
+      try {
+        return await navigator.mediaDevices.getUserMedia({ video: true, audio: audioConstraint });
+      } catch (err) {
+        throw err ?? lastErr;
+      }
+    },
+    [wantAudio],
+  );
+
   const start = useCallback(
-    async (mode: Facing) => {
+    async (targetFacing: Facing, deviceId: string | null = deviceIdRef.current) => {
       stopAll();
       const gen = generationRef.current;
       if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-        setPhase('unsupported'); // not a secure context (plain http) or an ancient browser
+        setPhase('unsupported');
         return;
       }
+
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: videoConstraints(mode),
-          audio: wantAudio ? { echoCancellation: true, noiseSuppression: true } : false,
-        });
+        stream = await acquireWithFallback(targetFacing, deviceId);
       } catch (e) {
-        if (gen === generationRef.current) setPhase(isPermissionError(e) ? 'denied' : 'error');
+        if (gen === generationRef.current) {
+          void refreshDevices();
+          setPhase(isPermissionError(e) ? 'denied' : 'error');
+        }
         return;
       }
+
       if (gen !== generationRef.current) {
-        stream.getTracks().forEach((t) => t.stop()); // unmounted or restarted while the prompt was open
+        stream.getTracks().forEach((t) => t.stop());
         return;
       }
-      const video = new MediaStream(stream.getVideoTracks());
+
+      const videoTrack = stream.getVideoTracks()[0];
+      const video = new MediaStream(videoTrack ? [videoTrack] : []);
       const audio = new MediaStream(stream.getAudioTracks());
       videoStreamRef.current = video;
       audioStreamRef.current = audio;
+
       try {
         await attach(video);
       } catch {
-        if (gen === generationRef.current) { stopAll(); setPhase('error'); }
+        if (gen === generationRef.current) {
+          stopAll();
+          setPhase('error');
+        }
         return;
       }
+
       if (gen !== generationRef.current) return;
-      facingRef.current = mode;
-      setFacing(mode);
+
+      // Read hardware capabilities (zoom & torch)
+      if (videoTrack && typeof videoTrack.getCapabilities === 'function') {
+        const caps = videoTrack.getCapabilities() as MediaTrackCapabilities & {
+          zoom?: { min?: number; max?: number; step?: number };
+          torch?: boolean;
+        };
+        if (caps.zoom && typeof caps.zoom.min === 'number' && typeof caps.zoom.max === 'number' && caps.zoom.max > caps.zoom.min) {
+          setZoomRange({ min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step ?? 0.1 });
+        } else {
+          setZoomRange(null);
+        }
+        setHasTorch(Boolean(caps.torch));
+      }
+
+      facingRef.current = targetFacing;
+      deviceIdRef.current = deviceId;
+      setFacing(targetFacing);
+      setSelectedDeviceId(deviceId);
       setAudioStream(audio);
       setPhase('ready');
+      void refreshDevices();
     },
-    [attach, stopAll, wantAudio],
+    [acquireWithFallback, attach, refreshDevices, stopAll],
   );
 
   const flip = useCallback(async () => {
     const next: Facing = facingRef.current === 'user' ? 'environment' : 'user';
     const prev = facingRef.current;
+    deviceIdRef.current = null;
+    setSelectedDeviceId(null);
     setNotice(null);
     setPhase('requesting');
-    await start(next);
+    await start(next, null);
     if (facingRef.current !== next && videoRef.current) {
       setNotice('Could not switch cameras on this device.');
-      await start(prev);
+      await start(prev, null);
     }
   }, [start]);
+
+  const selectDevice = useCallback(
+    async (deviceId: string) => {
+      setNotice(null);
+      setPhase('requesting');
+      await start(facingRef.current, deviceId);
+    },
+    [start],
+  );
 
   const retry = useCallback(() => {
     setPhase('requesting');
     setNotice(null);
-    return start(facingRef.current);
+    return start(facingRef.current, deviceIdRef.current);
   }, [start]);
 
+  const startAudioOnly = useCallback(async () => {
+    stopAll();
+    const gen = generationRef.current;
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setPhase('unsupported');
+      return;
+    }
+    try {
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+      if (gen !== generationRef.current) {
+        mic.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      audioStreamRef.current = mic;
+      setAudioStream(mic);
+      setNotice('Camera unavailable — running in Audio + 3D Avatar mode.');
+      setPhase('audio-only');
+    } catch (e) {
+      if (gen === generationRef.current) {
+        setPhase(isPermissionError(e) ? 'denied' : 'error');
+      }
+    }
+  }, [stopAll]);
+
+  const setHardwareZoom = useCallback(async (level: number): Promise<boolean> => {
+    const track = videoStreamRef.current?.getVideoTracks()[0];
+    if (!track || !zoomRange) return false;
+    const clamped = Math.min(zoomRange.max, Math.max(zoomRange.min, level));
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: clamped } as MediaTrackConstraintSet] });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [zoomRange]);
+
+  const setTorch = useCallback(async (enabled: boolean): Promise<boolean> => {
+    const track = videoStreamRef.current?.getVideoTracks()[0];
+    if (!track || !hasTorch) return false;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: enabled } as MediaTrackConstraintSet] });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [hasTorch]);
+
   useEffect(() => {
-    // Deferred so React's dev double-mount cancels the first attempt instead of prompting for permission twice.
-    const timer = setTimeout(() => { setPhase('requesting'); void start(facingRef.current); }, 0);
+    const timer = setTimeout(() => {
+      setPhase('requesting');
+      void start(facingRef.current, deviceIdRef.current);
+    }, 0);
     return () => {
       clearTimeout(timer);
-      stopAll(); // releases camera and microphone on unmount
+      stopAll();
     };
   }, [start, stopAll, mode]);
 
-  return { videoRef, audioStream, phase, facing, notice, flip, retry };
+  return {
+    videoRef,
+    audioStream,
+    phase,
+    facing,
+    notice,
+    devices,
+    selectedDeviceId,
+    zoomRange,
+    hasTorch,
+    flip,
+    retry,
+    selectDevice,
+    startAudioOnly,
+    setHardwareZoom,
+    setTorch,
+  };
 }
