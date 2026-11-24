@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowUp, Mic, MicOff, RotateCcw } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Mic, MicOff, RotateCcw, Smile } from 'lucide-react';
+import { Emoji3D, ReactionPill } from '@/components/chat/EmojiReactionSystem';
+import { ALL_EMOJIS } from '@/lib/chat/messageFormat';
 import { useAIChat } from '@/hooks/useAIChat';
 
 const STARTER_CARDS = [
@@ -28,6 +30,8 @@ function AIChatInner() {
   const { messages, status, hydrated, sendMessage, toggleReaction, clearChat } = useAIChat();
 
   const [input, setInput] = useState('');
+  const [showEmojis, setShowEmojis] = useState(false);
+  const [reactingId, setReactingId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -168,17 +172,30 @@ function AIChatInner() {
                   className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    onDoubleClick={() => !isUser && toggleReaction(msg.id, '❤️')}
-                    className={`relative max-w-[82%] px-4 py-2.5 text-[14.5px] leading-relaxed select-none ${
+                    onClick={() => setReactingId((cur) => (cur === msg.id ? null : msg.id))}
+                    onDoubleClick={() => toggleReaction(msg.id, '❤️')}
+                    className={`relative max-w-[82%] cursor-pointer px-4 py-2.5 text-[14.5px] leading-relaxed select-none ${
                       isUser
                         ? 'rounded-[22px] rounded-br-md bg-gradient-to-tr from-indigo-500 to-sky-400 text-white shadow-md'
                         : 'rounded-[22px] rounded-bl-md bg-white/85 backdrop-blur-xl border border-white/95 text-[#111827] shadow-sm'
                     }`}
                   >
+                    <AnimatePresence>
+                      {reactingId === msg.id && (
+                        <ReactionPill
+                          align={isUser ? 'end' : 'start'}
+                          onPick={(emoji) => {
+                            toggleReaction(msg.id, emoji);
+                            setReactingId(null);
+                          }}
+                          onClose={() => setReactingId(null)}
+                        />
+                      )}
+                    </AnimatePresence>
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                     {msg.reaction && (
-                      <span className="absolute -bottom-2.5 right-3 rounded-full bg-white px-1.5 py-0.5 text-xs shadow border border-slate-100">
-                        {msg.reaction}
+                      <span className="absolute -bottom-2.5 right-3 flex items-center justify-center rounded-full bg-white px-1.5 py-0.5 shadow border border-slate-100">
+                        <Emoji3D emoji={msg.reaction} size={18} />
                       </span>
                     )}
                   </div>
@@ -205,16 +222,54 @@ function AIChatInner() {
         <div ref={bottomRef} />
       </main>
 
+      <AnimatePresence>
+        {showEmojis && (
+          <motion.div
+            initial={{ opacity: 0, y: 12, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.96 }}
+            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-30 flex w-[calc(100%-24px)] max-w-[406px] flex-wrap justify-center gap-2 rounded-3xl border border-white/95 bg-white/85 p-3 shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur-2xl"
+          >
+            {ALL_EMOJIS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => {
+                  setInput((prev) => `${prev}${emoji}`);
+                  setShowEmojis(false);
+                }}
+                aria-label={`Insert ${emoji}`}
+                className="flex size-10 items-center justify-center rounded-full hover:bg-slate-100 active:scale-90 transition"
+              >
+                <Emoji3D emoji={emoji} size={28} />
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <form
         onSubmit={handleSubmit}
         className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 w-[calc(100%-24px)] max-w-[406px] flex items-center gap-2 rounded-full bg-white/80 backdrop-blur-2xl border border-white/95 px-3 py-2 shadow-[0_12px_32px_rgba(15,23,42,0.10)]"
       >
+        <button
+          type="button"
+          onClick={() => setShowEmojis((s) => !s)}
+          aria-label="3D Emojis"
+          aria-pressed={showEmojis}
+          className={`h-9 w-9 rounded-full flex items-center justify-center transition ${
+            showEmojis ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          <Smile className="h-4 w-4" />
+        </button>
+
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask anything..."
-          className="flex-1 bg-transparent px-2.5 text-[14.5px] text-slate-900 placeholder:text-slate-400 focus:outline-none"
+          className="flex-1 bg-transparent px-2 text-[14.5px] text-slate-900 placeholder:text-slate-400 focus:outline-none"
         />
 
         {speechSupported && (
