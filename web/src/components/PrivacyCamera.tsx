@@ -4,16 +4,19 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   CameraOff,
+  Check,
   Gauge,
   Grid3x3,
   ImagePlus,
   LoaderCircle,
   Lock,
+  RotateCcw,
   Sparkles,
   Square,
   Sun,
   SwitchCamera,
   Timer,
+  Wand2,
   X,
   Zap,
   ZapOff,
@@ -23,11 +26,19 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { ClayEmotionOrb } from '@/components/ClayEmotionOrb';
 import { MaskPlayer } from '@/components/MaskPlayer';
 import { MaskRecorder } from '@/components/MaskRecorder';
-import { ModeSelector } from '@/components/ModeSelector';
+import { ModeSelector, type CameraMode } from '@/components/ModeSelector';
 import { PreviewPlayer } from '@/components/PreviewPlayer';
-import { useCameraStream } from '@/hooks/useCameraStream';
-import { usePrivacyRecorder } from '@/hooks/usePrivacyRecorder';
-import { buildCanvasFilter, CAMERA_FILTERS, type FilterId } from '@/lib/cameraFilters';
+import { useCameraEngine } from '@/hooks/useCameraEngine';
+import { useMultiClipRecorder } from '@/hooks/useMultiClipRecorder';
+import {
+  AESTHETIC_FILTERS,
+  AR_LENSES,
+  composeCssFilter,
+  drawArLensOverlay,
+  drawNormalFrame,
+  type AestheticFilterId,
+  type ArLensId,
+} from '@/lib/camera/filterPipeline';
 import { drawBlurFrame, drawNoFaceGuardFrame, drawShadowFrame } from '@/lib/canvasRenderers';
 import { shouldUsePixelFallback } from '@/lib/device';
 import type { EmotionTag } from '@/lib/emotions';
@@ -60,6 +71,9 @@ export type PrivacyCameraProps = {
 
 const formatTime = (s: number): string => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+const frostedIconBtn =
+  'flex size-10 items-center justify-center rounded-full backdrop-blur-xl bg-white/75 border border-white/90 shadow-md text-slate-900 focus-visible:outline-2 focus-visible:outline-slate-900 disabled:opacity-40';
+
 export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose, className = '' }: PrivacyCameraProps) {
   const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -70,8 +84,10 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     return () => setImmersive('camera', false);
   }, []);
 
-  const [mode, setMode] = useState<PrivacyMode>('mask');
+  // Default Mode = 'normal' (Real Face Camera + Aesthetic Filters + AR Lenses)
+  const [mode, setMode] = useState<CameraMode>('normal');
   const [liveEmotion, setLiveEmotion] = useState<EmotionTag>('chill');
+
   const {
     videoRef,
     audioStream,
@@ -80,15 +96,19 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     notice: camNotice,
     devices,
     selectedDeviceId,
+    zoom,
     zoomRange,
-    hasTorch,
+    flashOn,
+    screenFlashActive,
+    setZoom,
+    setFlashOn,
+    triggerScreenFlash,
     flip: flipCamera,
     retry: retryCamera,
     selectDevice,
     startAudioOnly,
-    setHardwareZoom,
-    setTorch,
-  } = useCameraStream({ mode });
+    haptic,
+  } = useCameraEngine();
 
   // Creator & Camera controls state
   const [durationLimit, setDurationLimit] = useState<DurationLimit>(30);
@@ -96,36 +116,34 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   const [countdown, setCountdown] = useState<number | null>(null);
   const [speedRate, setSpeedRate] = useState<SpeedRate>(1);
   const [showGrid, setShowGrid] = useState(false);
-  const [flashOn, setFlashOn] = useState(false);
-  const [screenFlashActive, setScreenFlashActive] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [filterId, setFilterId] = useState<FilterId>('natural');
-  const [showFilters, setShowFilters] = useState(false);
+  const [filterId, setFilterId] = useState<AestheticFilterId>('clean');
+  const [lensId, setLensId] = useState<ArLensId>('none');
+  const [trayMode, setTrayMode] = useState<'none' | 'filters' | 'lenses'>('filters');
   const [exposure, setExposure] = useState(0);
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
   const [handsFreeLocked, setHandsFreeLocked] = useState(false);
   const [importedMedia, setImportedMedia] = useState<{ url: string; blob: Blob; mimeType: string } | null>(null);
 
-  const recorder = usePrivacyRecorder({ canvasRef, audioStream, maxSeconds: durationLimit });
+  const recorder = useMultiClipRecorder({ canvasRef, audioStream, maxSeconds: durationLimit });
 
-  // UI & model states
-  const [legacyWanted, setLegacyWanted] = useState(false);
+  // Models load when privacy mode OR soft_skin OR AR lens needs face detection
   const [maskPayload, setMaskPayload] = useState<MaskRecordingPayload | null>(null);
   const [maskRecording, setMaskRecording] = useState(false);
   const [maskAvatar, setMaskAvatar] = useState<AvatarId>('cyber_monk');
   const [models, setModels] = useState<ModelsState>('loading');
   const [modelsAttempt, setModelsAttempt] = useState(0);
   const [faceLocked, setFaceLocked] = useState(false);
+  const [capturedMode, setCapturedMode] = useState<CameraMode>('normal');
 
-  // Refs for 30fps loop & gesture tracking
-  const modeRef = useRef<PrivacyMode>('mask');
+  const modeRef = useRef<CameraMode>('normal');
   const recordingRef = useRef(false);
   const faceRef = useRef(false);
   const pixelRef = useRef(false);
   const modelsRef = useRef<Models | null>(null);
-  const startModeRef = useRef<PrivacyMode>('mask');
+  const startModeRef = useRef<CameraMode>('normal');
   const maskPayloadRef = useRef<MaskRecordingPayload | null>(null);
-  const filterRef = useRef<FilterId>('natural');
+  const filterRef = useRef<AestheticFilterId>('clean');
+  const lensRef = useRef<ArLensId>('none');
   const exposureRef = useRef(0);
   const zoomRef = useRef(1);
   const zoomSupportedRef = useRef(false);
@@ -136,7 +154,6 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   const holdTimerRef = useRef<number | null>(null);
   const shutterActiveHoldRef = useRef(false);
 
-  const activeFilter = CAMERA_FILTERS.find((f) => f.id === filterId) ?? CAMERA_FILTERS[0];
   const showPreview = (recorder.recordedUrl !== null && recorder.recordedBlob !== null) || importedMedia !== null;
   const inPreview = showPreview || Boolean(maskPayload);
   const loopActive = camPhase === 'ready' && !showPreview && mode !== 'mask';
@@ -144,11 +161,12 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { recordingRef.current = recorder.isRecording; }, [recorder.isRecording]);
   useEffect(() => { filterRef.current = filterId; }, [filterId]);
+  useEffect(() => { lensRef.current = lensId; }, [lensId]);
   useEffect(() => { exposureRef.current = exposure; }, [exposure]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { zoomSupportedRef.current = Boolean(zoomRange); }, [zoomRange]);
 
-  // iOS Safari edge-swipe back support while in preview
+  // iOS Safari swipe-back support while in preview
   const previewHistoryRef = useRef(false);
   useEffect(() => {
     if (!inPreview) {
@@ -175,9 +193,8 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     return () => window.removeEventListener('popstate', onPopState);
   }, [inPreview, recorder, importedMedia]);
 
-  // Load 2D privacy models lazily
+  // Load MediaPipe detector + segmenter for privacy modes, soft_skin, and AR face lenses
   useEffect(() => {
-    if (!legacyWanted) return;
     let cancelled = false;
     Promise.all([getFaceDetector(), getImageSegmenter()])
       .then(([detector, segmenter]) => {
@@ -185,12 +202,14 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
         modelsRef.current = { detector, segmenter };
         setModels('ready');
       })
-      .catch(() => { if (!cancelled) setModels('error'); });
+      .catch(() => {
+        if (!cancelled) setModels('error');
+      });
     return () => {
       cancelled = true;
       modelsRef.current = null;
     };
-  }, [modelsAttempt, legacyWanted]);
+  }, [modelsAttempt]);
 
   useEffect(() => () => { void disposeMediaPipe(); }, []);
   useEffect(() => { maskPayloadRef.current = maskPayload; }, [maskPayload]);
@@ -198,14 +217,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     if (maskPayloadRef.current) URL.revokeObjectURL(maskPayloadRef.current.audioUrl);
   }, []);
 
-  // Torch sync for back camera
-  useEffect(() => {
-    if (facing === 'environment' && hasTorch) {
-      void setTorch(flashOn);
-    }
-  }, [facing, hasTorch, flashOn, setTorch]);
-
-  // 30 FPS privacy + aesthetic filter + digital zoom render loop
+  // 60 FPS Canvas pipeline (Normal + Privacy modes + 8 Color/Beauty filters + 4 AR Face Lenses + Digital Zoom)
   useEffect(() => {
     if (!loopActive) return;
     const canvas = canvasRef.current;
@@ -245,14 +257,24 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
         windowFrames = 0;
       }
 
+      if (video.readyState < 2 || !video.videoWidth) { blank(); syncFace(false); return; }
       const m = modelsRef.current;
-      if (!m || video.readyState < 2 || !video.videoWidth) { blank(); syncFace(false); return; }
+      const currentMode = modeRef.current;
+      // Normal mode can render immediately even while face models finish loading; privacy modes fail closed
+      if (currentMode !== 'normal' && !m) {
+        blank();
+        syncFace(false);
+        return;
+      }
+
       const ts = Math.max(performance.now(), lastTs + 1);
       lastTs = ts;
+
       try {
-        const preset = CAMERA_FILTERS.find((f) => f.id === filterRef.current) ?? CAMERA_FILTERS[0];
-        const cssFilter = buildCanvasFilter(preset, exposureRef.current);
+        const preset = AESTHETIC_FILTERS.find((f) => f.id === filterRef.current) ?? AESTHETIC_FILTERS[0];
+        const cssFilter = composeCssFilter(preset, exposureRef.current);
         const digitalScale = zoomSupportedRef.current ? 1 : Math.max(0.5, zoomRef.current);
+        const activeLens = lensRef.current;
 
         ctx.save();
         if (digitalScale !== 1) {
@@ -262,17 +284,30 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
         }
         ctx.filter = cssFilter;
 
-        if (modeRef.current === 'shadow') {
+        if (currentMode === 'shadow' && m) {
           m.segmenter.segmentForVideo(video, ts, (r) => drawShadowFrame(ctx, video, r.categoryMask ?? null, CANVAS_W, CANVAS_H, offscreen));
           syncFace(false);
         } else {
-          const found = m.detector.detectForVideo(video, ts).detections;
+          const needsFace = currentMode !== 'normal' || Boolean(preset.softSkin) || activeLens !== 'none';
+          const found = m && needsFace ? m.detector.detectForVideo(video, ts).detections : [];
           if (found.length) { held = found; heldAge = 0; } else if (held.length && heldAge < HOLD_FRAMES) heldAge += 1; else held = [];
           const used = found.length ? found : held;
-          const r = modeRef.current === 'blur'
-            ? drawBlurFrame(ctx, video, used, CANVAS_W, CANVAS_H, pixelRef.current)
-            : drawNoFaceGuardFrame(ctx, video, used, CANVAS_W, CANVAS_H);
-          syncFace(r.faceDetected);
+
+          if (currentMode === 'normal') {
+            drawNormalFrame(ctx, video, used, CANVAS_W, CANVAS_H, preset);
+            syncFace(used.length > 0);
+          } else if (currentMode === 'blur') {
+            const r = drawBlurFrame(ctx, video, used, CANVAS_W, CANVAS_H, pixelRef.current);
+            syncFace(r.faceDetected);
+          } else {
+            const r = drawNoFaceGuardFrame(ctx, video, used, CANVAS_W, CANVAS_H);
+            syncFace(r.faceDetected);
+          }
+
+          ctx.filter = 'none';
+          if (activeLens !== 'none') {
+            drawArLensOverlay(ctx, video, used, CANVAS_W, CANVAS_H, activeLens, now);
+          }
         }
 
         ctx.filter = 'none';
@@ -284,7 +319,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
         errors = 0;
       } catch {
         ctx.restore();
-        blank();
+        if (modeRef.current !== 'normal') blank();
         if (++errors >= MAX_FRAME_ERRORS) setModels('error');
       }
     };
@@ -293,22 +328,19 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     return () => cancelAnimationFrame(raf);
   }, [loopActive, videoRef]);
 
-  const applyZoomLevel = useCallback((nextZoom: number) => {
-    const clamped = Math.round(Math.min(4, Math.max(0.5, nextZoom)) * 10) / 10;
-    setZoom(clamped);
-    if (zoomRange && clamped >= zoomRange.min) {
-      void setHardwareZoom(Math.min(zoomRange.max, clamped));
-    }
-  }, [zoomRange, setHardwareZoom]);
-
-  const canRecord = camPhase === 'ready' && models === 'ready' && !(mode === 'noface' && faceLocked);
+  const canRecord =
+    camPhase === 'ready' &&
+    (mode === 'normal' || models === 'ready') &&
+    !(mode === 'noface' && faceLocked);
 
   const beginRecordingNow = useCallback(() => {
     if (mode === 'noface' && faceRef.current) return;
     startModeRef.current = modeRef.current;
-    if (flashOn && facing === 'user') setScreenFlashActive(true);
-    void recorder.startRecording();
-  }, [mode, flashOn, facing, recorder]);
+    setCapturedMode(modeRef.current);
+    haptic(18);
+    if (flashOn && facing === 'user') triggerScreenFlash(durationLimit * 1000);
+    void recorder.startMultiClipSegment();
+  }, [mode, haptic, flashOn, facing, triggerScreenFlash, durationLimit, recorder]);
 
   const triggerWithTimer = useCallback((action: () => void) => {
     if (timerDelay === 0) {
@@ -332,27 +364,25 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   const captureSnapshot = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !canRecord) return;
-    if (flashOn && facing === 'user') {
-      setScreenFlashActive(true);
-      window.setTimeout(() => setScreenFlashActive(false), 350);
-    }
+    startModeRef.current = modeRef.current;
+    setCapturedMode(modeRef.current);
+    haptic(15);
+    if (flashOn && facing === 'user') triggerScreenFlash(360);
     canvas.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
       setImportedMedia({ url, blob, mimeType: blob.type || 'image/png' });
     }, 'image/png');
-  }, [canRecord, flashOn, facing]);
+  }, [canRecord, haptic, flashOn, facing, triggerScreenFlash]);
 
-  const stopAllRecording = useCallback(() => {
+  const stopActiveSegment = useCallback(() => {
     setHandsFreeLocked(false);
-    setScreenFlashActive(false);
     recorder.stopRecording();
   }, [recorder]);
 
-  // Smart Shutter pointer handlers (Tap = snapshot, Hold = video, Slide Up = zoom, Slide Left = hands-free lock)
   const onShutterPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (recorder.isRecording) {
-      stopAllRecording();
+      stopActiveSegment();
       return;
     }
     if (!canRecord || countdown !== null) return;
@@ -371,9 +401,10 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     const dy = start.y - e.clientY;
     const dx = start.x - e.clientX;
     if (dy > 10) {
-      applyZoomLevel(start.zoom + (dy - 10) / 80);
+      setZoom(start.zoom + (dy - 10) / 80);
     }
     if (dx > 55 && !handsFreeLocked) {
+      haptic(20);
       setHandsFreeLocked(true);
     }
   };
@@ -388,15 +419,21 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     shutterActiveHoldRef.current = false;
 
     if (!wasHold && !recorder.isRecording && countdown === null) {
-      triggerWithTimer(captureSnapshot);
+      if (recorder.segments.length === 0) {
+        triggerWithTimer(captureSnapshot);
+      } else {
+        triggerWithTimer(() => {
+          setHandsFreeLocked(true);
+          beginRecordingNow();
+        });
+      }
       return;
     }
     if (wasHold && recorder.isRecording && !handsFreeLocked) {
-      stopAllRecording();
+      stopActiveSegment();
     }
   };
 
-  // Viewfinder tap-to-focus, double-tap-to-flip, and pinch-to-zoom
   const onViewfinderTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length === 2) {
       const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -411,7 +448,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const dist = Math.hypot(dx, dy);
-      applyZoomLevel(pinchStartZoomRef.current * (dist / pinchStartDistRef.current));
+      setZoom(pinchStartZoomRef.current * (dist / pinchStartDistRef.current));
     }
   };
 
@@ -430,29 +467,37 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     lastTapAtRef.current = now;
     const rect = e.currentTarget.getBoundingClientRect();
     setFocusPoint({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-    window.setTimeout(() => setFocusPoint((cur) => (cur ? null : null)), 2500);
+    window.setTimeout(() => setFocusPoint(null), 2600);
   };
 
   const handleGalleryPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    startModeRef.current = modeRef.current;
+    setCapturedMode(modeRef.current);
     const url = URL.createObjectURL(file);
     setImportedMedia({ url, blob: file, mimeType: file.type || 'video/mp4' });
     e.target.value = '';
   };
 
   const getSnap = useCallback((): Omit<RecordedSnapPayload, 'url' | 'expiry'> | null => {
+    const dbMode: PrivacyMode = startModeRef.current === 'normal' ? 'blur' : startModeRef.current;
     if (importedMedia) {
       return {
         blob: importedMedia.blob,
         mimeType: importedMedia.mimeType,
-        mode: startModeRef.current,
+        mode: dbMode,
         durationSec: 5,
       };
     }
     const blob = recorder.recordedBlob;
     if (!blob) return null;
-    return { blob, mimeType: recorder.mimeType || blob.type, mode: startModeRef.current, durationSec: recorder.durationSec };
+    return {
+      blob,
+      mimeType: recorder.mimeType || blob.type,
+      mode: dbMode,
+      durationSec: recorder.durationSec,
+    };
   }, [recorder, importedMedia]);
 
   const submitMedia = onSubmitMedia
@@ -463,10 +508,10 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       }
     : undefined;
 
-  const selectMode = (next: PrivacyMode) => {
+  const selectMode = (next: CameraMode) => {
+    haptic(10);
     setMode(next);
     if (next !== 'mask') {
-      setLegacyWanted(true);
       setLiveEmotion('chill');
     }
   };
@@ -484,7 +529,10 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     recorder.resetRecording();
   };
 
-  const retryModels = () => { setModels('loading'); setModelsAttempt((n) => n + 1); };
+  const retryModels = () => {
+    setModels('loading');
+    setModelsAttempt((n) => n + 1);
+  };
   const mirrored = facing === 'user';
 
   const closeButton = (
@@ -492,7 +540,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       type="button"
       onClick={() => (onClose ? onClose() : router.push('/feed'))}
       aria-label={onClose ? 'Close camera' : 'Back to feed'}
-      className="flex size-11 items-center justify-center rounded-full border border-white/20 bg-black/35 text-white backdrop-blur-xl focus-visible:outline-2 focus-visible:outline-white"
+      className={frostedIconBtn}
     >
       {onClose ? <X aria-hidden className="size-5" /> : <ArrowLeft aria-hidden className="size-5" />}
     </button>
@@ -504,13 +552,13 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       onClick={() => void flipCamera()}
       disabled={camPhase !== 'ready' || recorder.isRecording || maskRecording}
       aria-label="Flip camera"
-      className="flex size-11 items-center justify-center rounded-full border border-white/20 bg-black/35 text-white backdrop-blur-xl focus-visible:outline-2 focus-visible:outline-white disabled:opacity-40"
+      className={frostedIconBtn}
     >
-      <SwitchCamera aria-hidden className="size-5" />
+      <SwitchCamera aria-hidden className="size-4" />
     </button>
   );
 
-  const progress = Math.min(1, recorder.recordingSeconds / durationLimit);
+  const progress = Math.min(1, recorder.totalRecordedSec / durationLimit);
   const ringR = 38;
   const ringC = 2 * Math.PI * ringR;
   const ringOffset = ringC * (1 - progress);
@@ -521,11 +569,30 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       onTouchMove={onViewfinderTouchMove}
       onTouchEnd={onViewfinderTouchEnd}
       onClick={onViewfinderClick}
-      className={`viewfinder relative aspect-[9/16] w-full overflow-hidden rounded-[32px] bg-[#0A0A0A] text-white shadow-[0_20px_60px_rgba(15,23,42,.18)] ${className}`}
+      className={`viewfinder relative h-[100dvh] w-full max-w-[430px] mx-auto overflow-hidden bg-[#0A0A0A] text-white ${className}`}
     >
+      {/* Multi-Clip Segmented Progress Bar Along Top Edge */}
+      {mode !== 'mask' && (recorder.segments.length > 0 || recorder.isRecording) && (
+        <div aria-hidden className="pointer-events-none absolute inset-x-3 top-[max(0.25rem,env(safe-area-inset-top))] z-30 flex h-1.5 gap-1 overflow-hidden rounded-full bg-white/25 p-0.5">
+          {recorder.segments.map((seg) => (
+            <div
+              key={seg.id}
+              style={{ width: `${Math.min(100, (seg.durationSec / durationLimit) * 100)}%` }}
+              className="h-full rounded-full bg-cyan-300"
+            />
+          ))}
+          {recorder.isRecording && (
+            <div
+              style={{ width: `${Math.min(100, ((recorder.totalRecordedSec - recorder.segments.reduce((s, c) => s + c.durationSec, 0)) / durationLimit) * 100)}%` }}
+              className="h-full rounded-full bg-rose-400 animate-pulse"
+            />
+          )}
+        </div>
+      )}
+
       {/* Front Screen-Flash Warm Glow */}
       {screenFlashActive && (
-        <div aria-hidden className="pointer-events-none absolute inset-0 z-30 border-[14px] border-amber-50/90 bg-amber-50/35" />
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-30 border-[16px] border-amber-50/95 bg-amber-50/40" />
       )}
 
       <EmotionPeek live={mode === 'mask' ? liveEmotion : 'chill'} />
@@ -536,15 +603,15 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
         width={CANVAS_W}
         height={CANVAS_H}
         role="img"
-        aria-label="Camera preview with privacy and aesthetic filters"
+        aria-label="Camera preview"
         className={`absolute inset-0 size-full object-cover ${mirrored ? '-scale-x-100' : ''} ${mode === 'mask' ? 'invisible' : ''}`}
       />
 
-      {/* Rule-of-thirds 3x3 Grid Overlay */}
+      {/* 3x3 Grid Overlay */}
       {showGrid && mode !== 'mask' && (
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[4] grid grid-cols-3 grid-rows-3">
           {Array.from({ length: 9 }).map((_, i) => (
-            <div key={i} className="border border-white/15" />
+            <div key={i} className="border border-white/20" />
           ))}
         </div>
       )}
@@ -556,9 +623,9 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
           style={{ left: Math.min(260, Math.max(24, focusPoint.x - 28)), top: Math.min(480, Math.max(60, focusPoint.y - 28)) }}
           className="absolute z-20 flex items-center gap-2"
         >
-          <span className="size-14 rounded-full border-2 border-amber-300/90 shadow-[0_0_16px_rgba(252,211,77,0.45)]" />
-          <div className="flex flex-col items-center gap-1 rounded-full bg-black/50 px-1.5 py-2 backdrop-blur-md">
-            <Sun aria-hidden className="size-3.5 text-amber-300" />
+          <span className="size-14 rounded-full border-2 border-white/95 shadow-[0_0_16px_rgba(255,255,255,0.6)]" />
+          <div className="flex flex-col items-center gap-1 rounded-full border border-white/90 bg-white/75 px-1.5 py-2 text-slate-900 shadow-lg backdrop-blur-xl">
+            <Sun aria-hidden className="size-3.5 text-amber-500" />
             <input
               type="range"
               min={-0.35}
@@ -567,23 +634,23 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
               value={exposure}
               aria-label="Exposure"
               onChange={(e) => setExposure(Number(e.target.value))}
-              className="h-20 w-1 accent-amber-300 [writing-mode:vertical-lr]"
+              className="h-20 w-1 accent-slate-900 [writing-mode:vertical-lr]"
             />
           </div>
         </div>
       )}
 
-      {/* Top Bar: Back Left + Mode Selector */}
+      {/* Top-Left Back Button + Top-Center Mode Pill */}
       <div className="absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-20" onClick={(e) => e.stopPropagation()}>
         {closeButton}
       </div>
 
       <ModeSelector activeMode={mode} onSelectMode={selectMode} disabled={recorder.isRecording || maskRecording} />
 
-      {/* Right Slim Vertical Mini Rail (Icons Only) */}
+      {/* Slim Right-Side Floating Frosted Acrylic Icon Rail */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className="absolute right-3 top-[max(4.5rem,env(safe-area-inset-top))] z-20 flex flex-col items-center gap-2.5"
+        className="absolute right-3 top-[max(4.5rem,calc(env(safe-area-inset-top)+3.75rem))] z-20 flex flex-col items-center gap-2"
       >
         {flipButton}
         <button
@@ -591,7 +658,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
           onClick={() => setFlashOn((f) => !f)}
           aria-label={flashOn ? 'Turn flash off' : 'Turn flash on'}
           aria-pressed={flashOn}
-          className={`flex size-10 items-center justify-center rounded-full border backdrop-blur-xl ${flashOn ? 'border-amber-300 bg-amber-400/30 text-amber-200' : 'border-white/20 bg-black/35 text-white'}`}
+          className={`${frostedIconBtn} ${flashOn ? '!bg-amber-300 !text-slate-950' : ''}`}
         >
           {flashOn ? <Zap aria-hidden className="size-4" /> : <ZapOff aria-hidden className="size-4" />}
         </button>
@@ -599,7 +666,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
           type="button"
           onClick={() => setTimerDelay((t) => (t === 0 ? 3 : t === 3 ? 10 : 0))}
           aria-label={`Timer: ${timerDelay || 'Off'}`}
-          className="flex size-10 flex-col items-center justify-center rounded-full border border-white/20 bg-black/35 text-[10px] font-bold backdrop-blur-xl"
+          className={`${frostedIconBtn} flex-col text-[9px] font-bold`}
         >
           <Timer aria-hidden className="size-3.5" />
           <span>{timerDelay ? `${timerDelay}s` : 'Off'}</span>
@@ -608,7 +675,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
           type="button"
           onClick={() => setSpeedRate((s) => (s === 1 ? 2 : s === 2 ? 0.5 : 1))}
           aria-label={`Speed: ${speedRate}x`}
-          className="flex size-10 flex-col items-center justify-center rounded-full border border-white/20 bg-black/35 text-[10px] font-bold backdrop-blur-xl"
+          className={`${frostedIconBtn} flex-col text-[9px] font-bold`}
         >
           <Gauge aria-hidden className="size-3.5" />
           <span>{speedRate}x</span>
@@ -618,74 +685,83 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
             <button
               type="button"
               onClick={() => setShowGrid((g) => !g)}
-              aria-label="Toggle grid"
+              aria-label="Toggle 3x3 grid"
               aria-pressed={showGrid}
-              className={`flex size-10 items-center justify-center rounded-full border backdrop-blur-xl ${showGrid ? 'border-white bg-white/25' : 'border-white/20 bg-black/35'}`}
+              className={`${frostedIconBtn} ${showGrid ? '!bg-slate-900 !text-white' : ''}`}
             >
               <Grid3x3 aria-hidden className="size-4" />
             </button>
             <button
               type="button"
-              onClick={() => setShowFilters((s) => !s)}
-              aria-label="Toggle color filters"
-              aria-pressed={showFilters}
-              className={`flex size-10 items-center justify-center rounded-full border backdrop-blur-xl ${showFilters || filterId !== 'natural' ? 'border-cyan-300 bg-cyan-400/25 text-cyan-100' : 'border-white/20 bg-black/35'}`}
+              onClick={() => setTrayMode((m) => (m === 'lenses' ? 'filters' : 'lenses'))}
+              aria-label="Toggle AR Face Lenses"
+              aria-pressed={trayMode === 'lenses'}
+              className={`${frostedIconBtn} ${trayMode === 'lenses' || lensId !== 'none' ? '!bg-slate-900 !text-white' : ''}`}
             >
-              <Sparkles aria-hidden className="size-4" />
+              <Wand2 aria-hidden className="size-4" />
             </button>
           </>
         )}
         <button
           type="button"
           onClick={() => setDurationLimit((d) => (d === 15 ? 30 : d === 30 ? 60 : 15))}
-          aria-label={`Max duration: ${durationLimit}s`}
-          className="flex size-10 items-center justify-center rounded-full border border-white/20 bg-black/35 text-[11px] font-bold backdrop-blur-xl"
+          aria-label={`Duration limit: ${durationLimit}s`}
+          className={`${frostedIconBtn} text-[10px] font-extrabold`}
         >
           {durationLimit}s
         </button>
       </div>
 
-      {/* Countdown Overlay */}
+      {/* Big Animated Countdown Overlay */}
       {countdown !== null && (
-        <div role="status" className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-black/35 backdrop-blur-[2px]">
+        <div role="status" className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-black/30 backdrop-blur-[2px]">
           <span className="text-7xl font-black tabular-nums drop-shadow-lg">{countdown}</span>
         </div>
       )}
 
-      {/* Status & Error Overlays with Device Switcher + Audio-Only Fallback */}
-      {camPhase === 'requesting' && <Overlay icon={<LoaderCircle aria-hidden className="size-8 animate-spin motion-reduce:animate-none" />} title="Starting camera…" body="Allow camera and microphone access when asked." />}
-      {camPhase === 'ready' && mode !== 'mask' && models === 'loading' && <Overlay icon={<LoaderCircle aria-hidden className="size-8 animate-spin motion-reduce:animate-none" />} title="Loading privacy filters…" body="First load downloads the face models." />}
-      {camPhase === 'ready' && mode !== 'mask' && models === 'error' && <Overlay icon={<CameraOff aria-hidden className="size-8" />} title="Privacy filters failed to load" body="Recording is locked until they load." action={<Action onClick={retryModels}>Try again</Action>} />}
+      {/* Light-Theme Frosted Recovery Card (Never a Dead Black Screen) */}
+      {camPhase === 'requesting' && <Overlay icon={<LoaderCircle aria-hidden className="size-8 animate-spin text-slate-800" />} title="Starting camera…" body="Allow camera and microphone access when asked." />}
+      {camPhase === 'ready' && mode !== 'mask' && mode !== 'normal' && models === 'loading' && <Overlay icon={<LoaderCircle aria-hidden className="size-8 animate-spin text-slate-800" />} title="Loading privacy shield…" body="Preparing on-device face protection." />}
+      {camPhase === 'ready' && mode !== 'mask' && mode !== 'normal' && models === 'error' && <Overlay icon={<CameraOff aria-hidden className="size-8 text-slate-800" />} title="Privacy shield failed to load" body="Recording is locked in this mode until models load." action={<Action onClick={retryModels}>Try again</Action>} />}
       {(camPhase === 'denied' || camPhase === 'unsupported' || camPhase === 'error') && (
         <Overlay
-          icon={<CameraOff aria-hidden className="size-8" />}
-          title={camPhase === 'denied' ? 'Camera or microphone blocked' : camPhase === 'unsupported' ? 'Camera needs HTTPS' : 'Couldn’t start the camera'}
-          body={camPhase === 'denied' ? 'Allow camera & mic in browser settings, or switch to Audio + 3D Avatar mode.' : 'Another app may hold the camera, or this page is not HTTPS.'}
+          icon={<CameraOff aria-hidden className="size-8 text-slate-800" />}
+          title={camPhase === 'denied' ? 'Camera or mic permission blocked' : camPhase === 'unsupported' ? 'Camera requires HTTPS' : 'Camera is busy or unavailable'}
+          body="Pick another camera below, or switch to Audio + 3D Avatar mode with zero webcam required."
           action={
-            <div className="flex flex-col items-center gap-2.5">
-              {devices.length > 1 && (
+            <div className="flex w-full flex-col items-center gap-2.5">
+              {devices.length > 0 && (
                 <select
-                  aria-label="Choose camera"
+                  aria-label="Choose camera device"
                   value={selectedDeviceId ?? ''}
                   onChange={(e) => void selectDevice(e.target.value)}
-                  className="min-h-10 rounded-full bg-white/15 px-4 text-xs text-white backdrop-blur-md"
+                  className="min-h-10 w-full rounded-full border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-900"
                 >
-                  <option value="" className="text-black">Switch camera…</option>
+                  <option value="">Select camera device…</option>
                   {devices.map((d, i) => (
-                    <option key={d.deviceId} value={d.deviceId} className="text-black">
+                    <option key={d.deviceId} value={d.deviceId}>
                       {d.label || `Camera ${i + 1}`}
                     </option>
                   ))}
                 </select>
               )}
-              <div className="flex gap-2">
-                <Action onClick={() => void retryCamera()}>Try again</Action>
+              <div className="flex w-full gap-2">
                 <button
                   type="button"
-                  onClick={() => { setMode('mask'); void startAudioOnly(); }}
-                  className="min-h-11 rounded-full border border-white/25 bg-white/10 px-4 text-xs font-semibold text-white"
+                  onClick={() => void retryCamera()}
+                  className="min-h-11 flex-1 rounded-full border border-slate-300 bg-white px-4 text-xs font-bold text-slate-900"
                 >
-                  Audio + Avatar Mode
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('mask');
+                    void startAudioOnly();
+                  }}
+                  className="min-h-11 flex-1 rounded-full bg-slate-900 px-4 text-xs font-bold text-white shadow"
+                >
+                  Audio + 3D Avatar
                 </button>
               </div>
             </div>
@@ -695,7 +771,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
 
       {mode === 'mask' && camNotice && (
         <div className="absolute inset-x-0 top-24 z-10 flex flex-col items-center gap-2 px-4">
-          <p role="alert" className="rounded-full bg-black/60 px-3 py-1 text-xs text-white/90">{camNotice}</p>
+          <p role="alert" className="rounded-full border border-white/90 bg-white/80 px-3 py-1 text-xs font-semibold text-slate-900 shadow backdrop-blur-xl">{camNotice}</p>
         </div>
       )}
 
@@ -716,72 +792,119 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
         />
       )}
       {mode === 'mask' && maskPayload && (
-        <MaskPlayer payload={maskPayload} onRetake={retakeMask} submit={submitMedia} submitLabel={submitLabel} onPublished={(postId) => { URL.revokeObjectURL(maskPayload.audioUrl); onPublished?.(postId); }} />
+        <MaskPlayer
+          payload={maskPayload}
+          onRetake={retakeMask}
+          submit={submitMedia}
+          submitLabel={submitLabel}
+          onPublished={(postId) => {
+            URL.revokeObjectURL(maskPayload.audioUrl);
+            onPublished?.(postId);
+          }}
+        />
       )}
 
-      {/* 2D Modes Bottom Controls: Zoom Pills + Filter Carousel + Gallery + Smart Shutter */}
+      {/* Bottom Creator Controls (Normal + 2D Privacy Modes) */}
       {mode !== 'mask' && (
         <div
           onClick={(e) => e.stopPropagation()}
           className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2.5 bg-gradient-to-t from-black/75 via-black/30 to-transparent px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-14"
         >
           {mode === 'noface' && faceLocked && camPhase === 'ready' && (
-            <p role="status" className="flex items-center gap-2 rounded-full border border-red-400/40 bg-red-500/20 px-3 py-1.5 text-xs font-semibold text-red-100 backdrop-blur-xl">
+            <p role="status" className="flex items-center gap-2 rounded-full border border-rose-300 bg-rose-500/90 px-3 py-1.5 text-xs font-bold text-white shadow backdrop-blur-xl">
               <Lock aria-hidden className="size-3.5" /> Face in frame — recording locked
             </p>
           )}
-          {recorder.isRecording && (
-            <p role="timer" aria-label="Recording time" className="flex items-center gap-2 rounded-full bg-black/55 px-3 py-1 text-xs font-semibold tabular-nums backdrop-blur-xl">
-              <span aria-hidden className="size-2 rounded-full bg-red-500 animate-pulse" />
+          {(recorder.isRecording || recorder.segments.length > 0) && (
+            <p role="timer" aria-label="Recording time" className="flex items-center gap-2 rounded-full border border-white/90 bg-white/80 px-3 py-1 text-xs font-bold tabular-nums text-slate-900 shadow backdrop-blur-xl">
+              <span aria-hidden className={`size-2 rounded-full ${recorder.isRecording ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
               {formatTime(recorder.recordingSeconds)} / {formatTime(durationLimit)}
-              {handsFreeLocked && <span className="ml-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px]">LOCKED</span>}
+              {handsFreeLocked && <span className="ml-1 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] text-white">🔒 LOCKED</span>}
             </p>
           )}
-          {(recorder.error || camNotice) && <p role="alert" className="rounded-full bg-black/60 px-3 py-1 text-xs text-white/90">{recorder.error ?? camNotice}</p>}
+          {(recorder.error || camNotice) && (
+            <p role="alert" className="rounded-full border border-white/90 bg-white/85 px-3 py-1 text-xs font-semibold text-slate-900 shadow backdrop-blur-xl">
+              {recorder.error ?? camNotice}
+            </p>
+          )}
 
-          {/* Quick Zoom Pills */}
-          <div className="flex items-center gap-1.5 rounded-full bg-black/40 p-1 backdrop-blur-md">
+          {/* Compact 0.5x / 1x / 2x Frosted Zoom Pills */}
+          <div className="flex items-center gap-1 rounded-full border border-white/90 bg-white/75 p-1 text-slate-900 shadow backdrop-blur-xl">
             {[0.5, 1, 2].map((z) => (
               <button
                 key={z}
                 type="button"
-                onClick={() => applyZoomLevel(z)}
-                className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold transition ${Math.abs(zoom - z) < 0.2 ? 'bg-white text-black' : 'text-white/80'}`}
+                onClick={() => setZoom(z)}
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold transition ${
+                  Math.abs(zoom - z) < 0.2 ? 'bg-slate-900 text-white' : 'text-slate-700'
+                }`}
               >
                 {z}x
               </button>
             ))}
           </div>
 
-          {/* Color Filter Carousel */}
-          {showFilters && (
+          {/* Horizontal Swipeable 8 Aesthetic Filters OR 4 AR Face Lenses */}
+          {trayMode === 'filters' ? (
             <div className="flex w-full max-w-sm gap-2 overflow-x-auto pb-1 no-scrollbar">
-              {CAMERA_FILTERS.map((f) => (
+              {AESTHETIC_FILTERS.map((f) => (
                 <button
                   key={f.id}
                   type="button"
                   onClick={() => setFilterId(f.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold backdrop-blur-md ${filterId === f.id ? 'border-white bg-white text-black' : 'border-white/20 bg-black/45 text-white'}`}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold backdrop-blur-xl transition ${
+                    filterId === f.id
+                      ? 'border-slate-900 bg-slate-900 text-white shadow'
+                      : 'border-white/90 bg-white/75 text-slate-900'
+                  }`}
                 >
-                  <span aria-hidden className="size-3 rounded-full" style={{ background: f.swatch }} />
+                  <span aria-hidden className="size-3 rounded-full border border-white" style={{ background: f.swatch }} />
                   {f.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex w-full max-w-sm gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {AR_LENSES.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setLensId(l.id)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold backdrop-blur-xl transition ${
+                    lensId === l.id
+                      ? 'border-slate-900 bg-slate-900 text-white shadow'
+                      : 'border-white/90 bg-white/75 text-slate-900'
+                  }`}
+                >
+                  <span>{l.badge}</span>
+                  <span>{l.label}</span>
                 </button>
               ))}
             </div>
           )}
 
-          {/* Bottom Row: Gallery Import | Smart Shutter | Flip */}
+          {/* Bottom Dock: Gallery Import | Smart Shutter | Undo / Finish Multi-Clip */}
           <div className="flex w-full items-center justify-between px-2">
-            <div>
+            <div className="flex items-center gap-2">
               <input ref={galleryInputRef} type="file" accept="video/*,image/*" onChange={handleGalleryPick} className="hidden" />
               <button
                 type="button"
                 onClick={() => galleryInputRef.current?.click()}
                 aria-label="Import from gallery"
-                className="flex size-12 items-center justify-center rounded-2xl border border-white/25 bg-white/15 text-white backdrop-blur-xl"
+                className="flex size-11 items-center justify-center rounded-2xl border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
               >
                 <ImagePlus aria-hidden className="size-5" />
               </button>
+              {recorder.segments.length > 0 && !recorder.isRecording && (
+                <button
+                  type="button"
+                  onClick={recorder.undoLastSegment}
+                  aria-label="Undo last clip"
+                  className="flex size-11 items-center justify-center rounded-full border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
+                >
+                  <RotateCcw aria-hidden className="size-4" />
+                </button>
+              )}
             </div>
 
             {/* Smart Shutter Button */}
@@ -793,17 +916,17 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
               onPointerCancel={onShutterPointerUp}
               disabled={!recorder.isRecording && !canRecord}
               aria-label={recorder.isRecording ? 'Stop recording' : 'Tap for photo, hold for video'}
-              className="relative flex size-20 touch-none items-center justify-center rounded-full border-4 border-white/90 transition-transform active:scale-95 disabled:opacity-40"
+              className="relative flex size-20 touch-none items-center justify-center rounded-full border-4 border-white/95 bg-white/25 shadow-[0_10px_30px_rgba(15,23,42,0.25)] backdrop-blur-md transition-transform active:scale-95 disabled:opacity-40"
             >
-              {recorder.isRecording && (
+              {(recorder.isRecording || recorder.segments.length > 0) && (
                 <svg aria-hidden viewBox="0 0 84 84" className="pointer-events-none absolute -inset-1 size-[calc(100%+8px)] -rotate-90">
-                  <circle cx="42" cy="42" r={ringR} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="4" />
+                  <circle cx="42" cy="42" r={ringR} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="4" />
                   <circle
                     cx="42"
                     cy="42"
                     r={ringR}
                     fill="none"
-                    stroke="#ef4444"
+                    stroke="#38bdf8"
                     strokeWidth="4"
                     strokeLinecap="round"
                     strokeDasharray={ringC}
@@ -812,15 +935,35 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
                 </svg>
               )}
               {recorder.isRecording ? (
-                <span className="flex size-11 items-center justify-center rounded-xl bg-red-500">
+                <span className="flex size-11 items-center justify-center rounded-xl bg-rose-500 shadow">
                   <Square aria-hidden className="size-5 fill-white text-white" />
                 </span>
               ) : (
-                <span className="size-14 rounded-full bg-red-500" />
+                <span className="size-14 rounded-full bg-gradient-to-tr from-rose-500 via-violet-500 to-cyan-400 shadow-inner" />
               )}
             </button>
 
-            <div className="flex size-12 items-center justify-center">{flipButton}</div>
+            <div className="flex items-center gap-2">
+              {recorder.segments.length > 0 && !recorder.isRecording ? (
+                <button
+                  type="button"
+                  onClick={recorder.finishMultiClip}
+                  aria-label="Finish and preview clip"
+                  className="flex size-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg"
+                >
+                  <Check aria-hidden className="size-5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setTrayMode((m) => (m === 'filters' ? 'lenses' : 'filters'))}
+                  aria-label="Switch filters and AR lenses"
+                  className="flex size-11 items-center justify-center rounded-full border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
+                >
+                  <Sparkles aria-hidden className="size-5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -834,6 +977,8 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
           onPublished={onPublished}
           submit={submitMedia}
           submitLabel={submitLabel}
+          isNormalFace={capturedMode === 'normal'}
+          onSwitchToMask={() => setMode('mask')}
         />
       )}
     </div>
@@ -842,18 +987,20 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
 
 function Overlay({ icon, title, body, action }: { icon: React.ReactNode; title: string; body: string; action?: React.ReactNode }) {
   return (
-    <div role="status" className="absolute inset-0 z-[15] flex flex-col items-center justify-center gap-3 bg-[#0A0A0A]/85 px-8 text-center backdrop-blur-sm">
-      {icon}
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="max-w-xs text-sm text-white/70">{body}</p>
-      {action}
+    <div role="status" className="absolute inset-0 z-[15] flex items-center justify-center bg-slate-900/45 px-6 backdrop-blur-md">
+      <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-[28px] border border-white/95 bg-white/90 p-6 text-center text-slate-900 shadow-2xl backdrop-blur-2xl">
+        {icon}
+        <h2 className="text-base font-bold">{title}</h2>
+        <p className="text-xs text-slate-600">{body}</p>
+        {action}
+      </div>
     </div>
   );
 }
 
 function Action({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" onClick={onClick} className="min-h-11 rounded-full bg-white px-5 text-sm font-semibold text-[#0A0A0A] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400">
+    <button type="button" onClick={onClick} className="min-h-11 rounded-full bg-slate-900 px-5 text-xs font-bold text-white shadow">
       {children}
     </button>
   );
