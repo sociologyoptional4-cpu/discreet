@@ -9,6 +9,7 @@ export type HardwareZoomRange = { min: number; max: number; step: number } | nul
 
 export type CameraEngine = {
   videoRef: RefObject<HTMLVideoElement | null>;
+  videoStream: MediaStream | null;
   audioStream: MediaStream | null;
   phase: CameraEnginePhase;
   facing: CameraFacing;
@@ -66,6 +67,7 @@ export function useCameraEngine({ audio: wantAudio = true }: { audio?: boolean }
 
   const [phase, setPhase] = useState<CameraEnginePhase>('requesting');
   const [facing, setFacing] = useState<CameraFacing>('user');
+  const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -203,6 +205,7 @@ export function useCameraEngine({ audio: wantAudio = true }: { audio?: boolean }
         setFacing(targetFacing);
         setSelectedDeviceId(deviceId);
         setZoomState(1);
+        setVideoStream(vStream);
         setAudioStream(aStream);
         setPhase('ready');
         void refreshDevices();
@@ -310,6 +313,7 @@ export function useCameraEngine({ audio: wantAudio = true }: { audio?: boolean }
 
   return {
     videoRef,
+    videoStream,
     audioStream,
     phase,
     facing,

@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -23,6 +23,13 @@ import {
 } from 'lucide-react';
 import type { Detection, FaceDetector, ImageSegmenter } from '@mediapipe/tasks-vision';
 import { motion, useReducedMotion } from 'framer-motion';
+import { CameraViewfinder } from '@/components/camera/CameraViewfinder';
+import { LensCarousel, type CarouselOrbItem } from '@/components/camera/LensCarousel';
+import {
+  LensExplorerToast,
+  MysteryBurstOverlay,
+  useLensGamification,
+} from '@/components/camera/LensGamification';
 import { ClayEmotionOrb } from '@/components/ClayEmotionOrb';
 import { MaskPlayer } from '@/components/MaskPlayer';
 import { MaskRecorder } from '@/components/MaskRecorder';
@@ -39,6 +46,7 @@ import {
   type AestheticFilterId,
   type ArLensId,
 } from '@/lib/camera/filterPipeline';
+import { snapCameraKitAdapter, type SnapLensItem } from '@/lib/camera/snapCameraKitAdapter';
 import { drawBlurFrame, drawNoFaceGuardFrame, drawShadowFrame } from '@/lib/canvasRenderers';
 import { shouldUsePixelFallback } from '@/lib/device';
 import type { EmotionTag } from '@/lib/emotions';
@@ -90,6 +98,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
 
   const {
     videoRef,
+    videoStream,
     audioStream,
     phase: camPhase,
     facing,
@@ -118,11 +127,25 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   const [showGrid, setShowGrid] = useState(false);
   const [filterId, setFilterId] = useState<AestheticFilterId>('clean');
   const [lensId, setLensId] = useState<ArLensId>('none');
-  const [trayMode, setTrayMode] = useState<'none' | 'filters' | 'lenses'>('filters');
+  const [lensCategory, setLensCategory] = useState<'snap' | 'studio'>(() =>
+    snapCameraKitAdapter.isConfigured() ? 'snap' : 'studio'
+  );
+  const [snapLenses, setSnapLenses] = useState<SnapLensItem[]>(() =>
+    snapCameraKitAdapter.getCachedCatalog()
+  );
+  const [activeSnapLensId, setActiveSnapLensId] = useState<string>('clean');
   const [exposure, setExposure] = useState(0);
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
   const [handsFreeLocked, setHandsFreeLocked] = useState(false);
   const [importedMedia, setImportedMedia] = useState<{ url: string; blob: Blob; mimeType: string } | null>(null);
+
+  const {
+    exploredIds,
+    toast: explorerToast,
+    mysteryBurstActive,
+    recordLensTry,
+    triggerMysteryUnlock,
+  } = useLensGamification();
 
   const recorder = useMultiClipRecorder({ canvasRef, audioStream, maxSeconds: durationLimit });
 
@@ -212,6 +235,37 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   }, [modelsAttempt]);
 
   useEffect(() => () => { void disposeMediaPipe(); }, []);
+
+  // Initialize Snap Camera Kit repository (all 21+ lenses)
+  useEffect(() => {
+    if (!snapCameraKitAdapter.isConfigured()) return;
+    let cancelled = false;
+    void snapCameraKitAdapter.initialize().then((items) => {
+      if (!cancelled && items.length > 0) setSnapLenses(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Keep Snap Camera Kit stream bound to active camera stream
+  useEffect(() => {
+    if (!videoStream || mode === 'mask') return;
+    void snapCameraKitAdapter.attachStream(videoStream, facing);
+  }, [videoStream, facing, mode]);
+
+  // Apply or clear Snap Lens cleanly on selection / mode changes
+  useEffect(() => {
+    if (mode !== 'normal' || lensCategory !== 'snap' || activeSnapLensId === 'clean') {
+      void snapCameraKitAdapter.clearLens();
+      return;
+    }
+    const idx = snapLenses.findIndex((l) => l.id === activeSnapLensId);
+    if (idx >= 0) {
+      void snapCameraKitAdapter.preloadAdjacent(idx);
+    }
+    void snapCameraKitAdapter.applyLens(activeSnapLensId, videoStream, facing);
+  }, [mode, lensCategory, activeSnapLensId, snapLenses, videoStream, facing]);
   useEffect(() => { maskPayloadRef.current = maskPayload; }, [maskPayload]);
   useEffect(() => () => {
     if (maskPayloadRef.current) URL.revokeObjectURL(maskPayloadRef.current.audioUrl);
@@ -294,7 +348,12 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
           const used = found.length ? found : held;
 
           if (currentMode === 'normal') {
-            drawNormalFrame(ctx, video, used, CANVAS_W, CANVAS_H, preset);
+            const snapCanvas = snapCameraKitAdapter.getOutputCanvas();
+            if (snapCanvas && snapCanvas.width > 0 && snapCanvas.height > 0) {
+              ctx.drawImage(snapCanvas, 0, 0, CANVAS_W, CANVAS_H);
+            } else {
+              drawNormalFrame(ctx, video, used, CANVAS_W, CANVAS_H, preset);
+            }
             syncFace(used.length > 0);
           } else if (currentMode === 'blur') {
             const r = drawBlurFrame(ctx, video, used, CANVAS_W, CANVAS_H, pixelRef.current);
@@ -558,19 +617,160 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     </button>
   );
 
+  const studioItems: CarouselOrbItem[] = useMemo(() => {
+    const filterOrbs: CarouselOrbItem[] = AESTHETIC_FILTERS.map((f) => ({
+      id: `filter:${f.id}`,
+      name: f.label,
+      swatch: f.swatch,
+      isUnexplored: f.id !== 'clean' && !exploredIds.has(`filter:${f.id}`),
+    }));
+    const arOrbs: CarouselOrbItem[] = AR_LENSES.filter((l) => l.id !== 'none').map((l) => ({
+      id: `ar:${l.id}`,
+      name: l.label,
+      badge: l.badge,
+      isUnexplored: !exploredIds.has(`ar:${l.id}`),
+    }));
+    return [...filterOrbs, ...arOrbs];
+  }, [exploredIds]);
+
+  const snapItems: CarouselOrbItem[] = useMemo(() => {
+    const cleanOrb: CarouselOrbItem = { id: 'clean', name: 'Clean', badge: '✨', isSnap: false };
+    const mysteryOrb: CarouselOrbItem = { id: '__mystery__', name: 'Mystery Lens', badge: '🎁', isMystery: true };
+    const mapped: CarouselOrbItem[] = snapLenses.map((l) => ({
+      id: l.id,
+      name: l.name,
+      iconUrl: l.iconUrl,
+      badge: '👻',
+      isSnap: true,
+      isUnexplored: !exploredIds.has(l.id),
+    }));
+    if (mapped.length >= 2) {
+      return [cleanOrb, mapped[0], mysteryOrb, ...mapped.slice(1)];
+    }
+    return [cleanOrb, ...mapped, mysteryOrb];
+  }, [snapLenses, exploredIds]);
+
+  const activeCarouselItems = lensCategory === 'snap' ? snapItems : studioItems;
+  const activeCarouselId =
+    lensCategory === 'snap'
+      ? activeSnapLensId
+      : lensId !== 'none'
+        ? `ar:${lensId}`
+        : `filter:${filterId}`;
+
+  const handleSelectCarouselOrb = useCallback(
+    (id: string) => {
+      haptic(10);
+      if (id === '__mystery__') {
+        if (lensCategory === 'snap' && snapLenses.length > 0) {
+          const picked = triggerMysteryUnlock(snapLenses);
+          if (picked) {
+            setActiveSnapLensId(picked.id);
+            recordLensTry(picked.id);
+          }
+        } else {
+          const studioPool = studioItems.filter((i) => i.id !== 'filter:clean');
+          const picked = triggerMysteryUnlock(studioPool);
+          if (picked) {
+            if (picked.id.startsWith('ar:')) {
+              setLensId(picked.id.replace('ar:', '') as ArLensId);
+            } else {
+              setLensId('none');
+              setFilterId(picked.id.replace('filter:', '') as AestheticFilterId);
+            }
+            recordLensTry(picked.id);
+          }
+        }
+        return;
+      }
+
+      if (lensCategory === 'snap') {
+        setActiveSnapLensId(id);
+        if (id !== 'clean') recordLensTry(id);
+      } else if (id.startsWith('ar:')) {
+        const nextAr = id.replace('ar:', '') as ArLensId;
+        setLensId(nextAr);
+        recordLensTry(id);
+      } else if (id.startsWith('filter:')) {
+        const nextFilter = id.replace('filter:', '') as AestheticFilterId;
+        setLensId('none');
+        setFilterId(nextFilter);
+        if (nextFilter !== 'clean') recordLensTry(id);
+      }
+    },
+    [haptic, lensCategory, snapLenses, studioItems, triggerMysteryUnlock, recordLensTry]
+  );
+
+  const stepCarousel = useCallback(
+    (delta: 1 | -1) => {
+      if (activeCarouselItems.length === 0) return;
+      const curIdx = activeCarouselItems.findIndex((i) => i.id === activeCarouselId);
+      const baseIdx = curIdx >= 0 ? curIdx : 0;
+      const nextIdx = (baseIdx + delta + activeCarouselItems.length) % activeCarouselItems.length;
+      handleSelectCarouselOrb(activeCarouselItems[nextIdx].id);
+    },
+    [activeCarouselItems, activeCarouselId, handleSelectCarouselOrb]
+  );
+
   const progress = Math.min(1, recorder.totalRecordedSec / durationLimit);
   const ringR = 38;
   const ringC = 2 * Math.PI * ringR;
   const ringOffset = ringC * (1 - progress);
 
+  const activeOrb = activeCarouselItems.find((i) => i.id === activeCarouselId);
+
+  const shutterButtonNode = (
+    <button
+      type="button"
+      onPointerDown={onShutterPointerDown}
+      onPointerMove={onShutterPointerMove}
+      onPointerUp={onShutterPointerUp}
+      onPointerCancel={onShutterPointerUp}
+      disabled={!recorder.isRecording && !canRecord}
+      aria-label={recorder.isRecording ? 'Stop recording' : 'Tap for photo, hold for video'}
+      className="relative flex size-20 touch-none items-center justify-center rounded-full border-4 border-white/95 bg-white/30 shadow-[0_10px_30px_rgba(15,23,42,0.28)] backdrop-blur-md transition-transform active:scale-95 disabled:opacity-40"
+    >
+      {(recorder.isRecording || recorder.segments.length > 0) && (
+        <svg aria-hidden viewBox="0 0 84 84" className="pointer-events-none absolute -inset-1 size-[calc(100%+8px)] -rotate-90">
+          <circle cx="42" cy="42" r={ringR} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="4" />
+          <circle
+            cx="42"
+            cy="42"
+            r={ringR}
+            fill="none"
+            stroke="#38bdf8"
+            strokeWidth="4"
+            strokeLinecap="round"
+            strokeDasharray={ringC}
+            strokeDashoffset={ringOffset}
+          />
+        </svg>
+      )}
+      {recorder.isRecording ? (
+        <span className="flex size-11 items-center justify-center rounded-xl bg-rose-500 shadow">
+          <Square aria-hidden className="size-5 fill-white text-white" />
+        </span>
+      ) : activeOrb?.iconUrl ? (
+        <img src={activeOrb.iconUrl} alt={activeOrb.name} className="size-14 rounded-full object-cover ring-2 ring-white" />
+      ) : (
+        <span className="size-14 rounded-full bg-gradient-to-tr from-rose-500 via-violet-500 to-cyan-400 shadow-inner" />
+      )}
+    </button>
+  );
+
   return (
-    <div
-      onTouchStart={onViewfinderTouchStart}
-      onTouchMove={onViewfinderTouchMove}
-      onTouchEnd={onViewfinderTouchEnd}
+    <CameraViewfinder
+      swipeEnabled={mode !== 'mask' && !showPreview && !recorder.isRecording}
+      onSwipeNext={() => stepCarousel(1)}
+      onSwipePrev={() => stepCarousel(-1)}
+      onTouchStartExtra={onViewfinderTouchStart}
+      onTouchMoveExtra={onViewfinderTouchMove}
+      onTouchEndExtra={onViewfinderTouchEnd}
       onClick={onViewfinderClick}
       className={`viewfinder relative h-[100dvh] w-full max-w-[430px] mx-auto overflow-hidden bg-[#0A0A0A] text-white ${className}`}
     >
+      <LensExplorerToast toast={explorerToast} />
+      <MysteryBurstOverlay active={mysteryBurstActive} />
       {/* Multi-Clip Segmented Progress Bar Along Top Edge */}
       {mode !== 'mask' && (recorder.segments.length > 0 || recorder.isRecording) && (
         <div aria-hidden className="pointer-events-none absolute inset-x-3 top-[max(0.25rem,env(safe-area-inset-top))] z-30 flex h-1.5 gap-1 overflow-hidden rounded-full bg-white/25 p-0.5">
@@ -693,10 +893,10 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
             </button>
             <button
               type="button"
-              onClick={() => setTrayMode((m) => (m === 'lenses' ? 'filters' : 'lenses'))}
-              aria-label="Toggle AR Face Lenses"
-              aria-pressed={trayMode === 'lenses'}
-              className={`${frostedIconBtn} ${trayMode === 'lenses' || lensId !== 'none' ? '!bg-slate-900 !text-white' : ''}`}
+              onClick={() => setLensCategory((c) => (c === 'snap' ? 'studio' : 'snap'))}
+              aria-label="Toggle Snap AR and Studio FX"
+              aria-pressed={lensCategory === 'snap'}
+              className={`${frostedIconBtn} ${lensCategory === 'snap' ? '!bg-slate-900 !text-white' : ''}`}
             >
               <Wand2 aria-hidden className="size-4" />
             </button>
@@ -844,104 +1044,41 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
             ))}
           </div>
 
-          {/* Horizontal Swipeable 8 Aesthetic Filters OR 4 AR Face Lenses */}
-          {trayMode === 'filters' ? (
-            <div className="flex w-full max-w-sm gap-2 overflow-x-auto pb-1 no-scrollbar">
-              {AESTHETIC_FILTERS.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => setFilterId(f.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold backdrop-blur-xl transition ${
-                    filterId === f.id
-                      ? 'border-slate-900 bg-slate-900 text-white shadow'
-                      : 'border-white/90 bg-white/75 text-slate-900'
-                  }`}
-                >
-                  <span aria-hidden className="size-3 rounded-full border border-white" style={{ background: f.swatch }} />
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="flex w-full max-w-sm gap-2 overflow-x-auto pb-1 no-scrollbar">
-              {AR_LENSES.map((l) => (
-                <button
-                  key={l.id}
-                  type="button"
-                  onClick={() => setLensId(l.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold backdrop-blur-xl transition ${
-                    lensId === l.id
-                      ? 'border-slate-900 bg-slate-900 text-white shadow'
-                      : 'border-white/90 bg-white/75 text-slate-900'
-                  }`}
-                >
-                  <span>{l.badge}</span>
-                  <span>{l.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Shutter-Integrated Snapchat-Style Lens Carousel */}
+          <LensCarousel
+            category={lensCategory}
+            onCategoryChange={setLensCategory}
+            snapCount={snapLenses.length}
+            studioCount={studioItems.length}
+            items={activeCarouselItems}
+            activeId={activeCarouselId}
+            onSelect={handleSelectCarouselOrb}
+            shutterButton={shutterButtonNode}
+          />
 
-          {/* Bottom Dock: Gallery Import | Smart Shutter | Undo / Finish Multi-Clip */}
-          <div className="flex w-full items-center justify-between px-2">
+          {/* Compact Bottom Action Row: Gallery Import | Undo | Finish Multi-Clip / Category Quick Toggle */}
+          <div className="flex w-full items-center justify-between px-4">
             <div className="flex items-center gap-2">
               <input ref={galleryInputRef} type="file" accept="video/*,image/*" onChange={handleGalleryPick} className="hidden" />
               <button
                 type="button"
                 onClick={() => galleryInputRef.current?.click()}
                 aria-label="Import from gallery"
-                className="flex size-11 items-center justify-center rounded-2xl border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
+                className="flex size-10 items-center justify-center rounded-2xl border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
               >
-                <ImagePlus aria-hidden className="size-5" />
+                <ImagePlus aria-hidden className="size-4" />
               </button>
               {recorder.segments.length > 0 && !recorder.isRecording && (
                 <button
                   type="button"
                   onClick={recorder.undoLastSegment}
                   aria-label="Undo last clip"
-                  className="flex size-11 items-center justify-center rounded-full border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
+                  className="flex size-10 items-center justify-center rounded-full border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
                 >
                   <RotateCcw aria-hidden className="size-4" />
                 </button>
               )}
             </div>
-
-            {/* Smart Shutter Button */}
-            <button
-              type="button"
-              onPointerDown={onShutterPointerDown}
-              onPointerMove={onShutterPointerMove}
-              onPointerUp={onShutterPointerUp}
-              onPointerCancel={onShutterPointerUp}
-              disabled={!recorder.isRecording && !canRecord}
-              aria-label={recorder.isRecording ? 'Stop recording' : 'Tap for photo, hold for video'}
-              className="relative flex size-20 touch-none items-center justify-center rounded-full border-4 border-white/95 bg-white/25 shadow-[0_10px_30px_rgba(15,23,42,0.25)] backdrop-blur-md transition-transform active:scale-95 disabled:opacity-40"
-            >
-              {(recorder.isRecording || recorder.segments.length > 0) && (
-                <svg aria-hidden viewBox="0 0 84 84" className="pointer-events-none absolute -inset-1 size-[calc(100%+8px)] -rotate-90">
-                  <circle cx="42" cy="42" r={ringR} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="4" />
-                  <circle
-                    cx="42"
-                    cy="42"
-                    r={ringR}
-                    fill="none"
-                    stroke="#38bdf8"
-                    strokeWidth="4"
-                    strokeLinecap="round"
-                    strokeDasharray={ringC}
-                    strokeDashoffset={ringOffset}
-                  />
-                </svg>
-              )}
-              {recorder.isRecording ? (
-                <span className="flex size-11 items-center justify-center rounded-xl bg-rose-500 shadow">
-                  <Square aria-hidden className="size-5 fill-white text-white" />
-                </span>
-              ) : (
-                <span className="size-14 rounded-full bg-gradient-to-tr from-rose-500 via-violet-500 to-cyan-400 shadow-inner" />
-              )}
-            </button>
 
             <div className="flex items-center gap-2">
               {recorder.segments.length > 0 && !recorder.isRecording ? (
@@ -949,18 +1086,19 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
                   type="button"
                   onClick={recorder.finishMultiClip}
                   aria-label="Finish and preview clip"
-                  className="flex size-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg"
+                  className="flex h-10 items-center gap-1.5 rounded-full bg-slate-900 px-4 text-xs font-extrabold text-white shadow-lg"
                 >
-                  <Check aria-hidden className="size-5" />
+                  <Check aria-hidden className="size-4" />
+                  <span>Done</span>
                 </button>
               ) : (
                 <button
                   type="button"
-                  onClick={() => setTrayMode((m) => (m === 'filters' ? 'lenses' : 'filters'))}
-                  aria-label="Switch filters and AR lenses"
-                  className="flex size-11 items-center justify-center rounded-full border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
+                  onClick={() => setLensCategory((c) => (c === 'snap' ? 'studio' : 'snap'))}
+                  aria-label="Switch Snap AR and Studio FX"
+                  className="flex size-10 items-center justify-center rounded-full border border-white/90 bg-white/75 text-slate-900 shadow-lg backdrop-blur-xl"
                 >
-                  <Sparkles aria-hidden className="size-5" />
+                  <Sparkles aria-hidden className="size-4" />
                 </button>
               )}
             </div>
@@ -981,7 +1119,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
           onSwitchToMask={() => setMode('mask')}
         />
       )}
-    </div>
+    </CameraViewfinder>
   );
 }
 
