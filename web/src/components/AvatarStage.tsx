@@ -37,27 +37,88 @@ const clamp = THREE.MathUtils.clamp;
 
 const VRM_CACHE_NAME = 'vybe-vrm-cache-v1';
 const failedUrls = new Set<string>();
+const bufferCache = new Map<string, Promise<ArrayBuffer>>();
+const vrmPool = new Map<string, Promise<VRM>>();
+const MAX_POOLED_VRMS = 4;
 
-async function fetchVrmBuffer(url: string, signal: AbortSignal): Promise<ArrayBuffer> {
-  if (typeof caches !== 'undefined') {
-    try {
-      const cache = await caches.open(VRM_CACHE_NAME);
-      const cached = await cache.match(url);
-      if (cached && cached.ok) return await cached.arrayBuffer();
-      const res = await fetch(url, { signal });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await cache.put(url, res.clone());
-      return await res.arrayBuffer();
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') throw err;
+async function fetchVrmBuffer(url: string): Promise<ArrayBuffer> {
+  const mem = bufferCache.get(url);
+  if (mem) return mem;
+
+  const task = (async () => {
+    if (typeof caches !== 'undefined') {
+      try {
+        const cache = await caches.open(VRM_CACHE_NAME);
+        const cached = await cache.match(url);
+        if (cached && cached.ok) return await cached.arrayBuffer();
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await cache.put(url, res.clone());
+        return await res.arrayBuffer();
+      } catch {
+        /* fallback to plain fetch */
+      }
     }
-  }
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.arrayBuffer();
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.arrayBuffer();
+  })().catch((err) => {
+    bufferCache.delete(url);
+    throw err;
+  });
+
+  bufferCache.set(url, task);
+  return task;
 }
 
-function VrmAvatar({ url, currentFrameRef, onUnavailable }: { url: string; currentFrameRef: RefObject<MotionFrame | null>; onUnavailable: () => void }) {
+function loadPooledVrm(url: string): Promise<VRM> {
+  const existing = vrmPool.get(url);
+  if (existing) {
+    // Refresh LRU order
+    vrmPool.delete(url);
+    vrmPool.set(url, existing);
+    return existing;
+  }
+
+  const task = fetchVrmBuffer(url)
+    .then((buf) => {
+      const loader = new GLTFLoader();
+      loader.register((parser) => new VRMLoaderPlugin(parser));
+      return loader.parseAsync(buf, url);
+    })
+    .then((gltf) => {
+      const instance = gltf.userData.vrm as VRM | undefined;
+      if (!instance) throw new Error('Invalid VRM asset');
+      VRMUtils.removeUnnecessaryVertices(gltf.scene);
+      VRMUtils.combineSkeletons(gltf.scene);
+      VRMUtils.rotateVRM0(instance);
+
+      instance.scene.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(instance.scene);
+      const size = box.getSize(new THREE.Vector3());
+      const scale = 1.45 / Math.max(size.y, 0.001);
+      instance.scene.scale.setScalar(scale);
+      instance.scene.position.set(0, -box.min.y * scale - 0.85, 0);
+      return instance;
+    })
+    .catch((err) => {
+      vrmPool.delete(url);
+      throw err;
+    });
+
+  if (vrmPool.size >= MAX_POOLED_VRMS) {
+    const oldestKey = vrmPool.keys().next().value;
+    if (oldestKey) {
+      const oldestPromise = vrmPool.get(oldestKey);
+      vrmPool.delete(oldestKey);
+      void oldestPromise?.then((oldVrm) => VRMUtils.deepDispose(oldVrm.scene)).catch(() => {});
+    }
+  }
+  vrmPool.set(url, task);
+  return task;
+}
+
+function VrmAvatar({ url, avatarId, currentFrameRef, onUnavailable }: { url: string; avatarId: AvatarId; currentFrameRef: RefObject<MotionFrame | null>; onUnavailable: () => void }) {
   const [vrm, setVrm] = useState<VRM | null>(null);
   const onUnavailableRef = useRef(onUnavailable);
   useEffect(() => { onUnavailableRef.current = onUnavailable; }, [onUnavailable]);
@@ -67,48 +128,19 @@ function VrmAvatar({ url, currentFrameRef, onUnavailable }: { url: string; curre
       onUnavailableRef.current();
       return;
     }
-    const ctrl = new AbortController();
-    let loaded: VRM | null = null;
-
-    fetchVrmBuffer(url, ctrl.signal)
-      .then((buf) => {
-        if (ctrl.signal.aborted) return;
-        const loader = new GLTFLoader();
-        loader.register((parser) => new VRMLoaderPlugin(parser));
-        return loader.parseAsync(buf, url);
+    let alive = true;
+    loadPooledVrm(url)
+      .then((instance) => {
+        if (alive) setVrm(instance);
       })
-      .then((gltf) => {
-        if (!gltf || ctrl.signal.aborted) return;
-        const instance = gltf.userData.vrm as VRM | undefined;
-        if (!instance) throw new Error('Invalid VRM asset');
-        VRMUtils.removeUnnecessaryVertices(gltf.scene);
-        VRMUtils.combineSkeletons(gltf.scene);
-        VRMUtils.rotateVRM0(instance);
-
-        // Normalize scale & framing to match 9:16 stage
-        instance.scene.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(instance.scene);
-        const size = box.getSize(new THREE.Vector3());
-        const scale = 1.45 / Math.max(size.y, 0.001);
-        instance.scene.scale.setScalar(scale);
-        instance.scene.position.set(0, -box.min.y * scale - 0.85, 0);
-
-        loaded = instance;
-        setVrm(instance);
-      })
-      .catch((err) => {
-        if ((err as Error)?.name === 'AbortError') return;
+      .catch(() => {
+        if (!alive) return;
         failedUrls.add(url);
         onUnavailableRef.current();
       });
 
     return () => {
-      ctrl.abort();
-      if (loaded) {
-        VRMUtils.deepDispose(loaded.scene);
-        loaded = null;
-      }
-      setVrm(null);
+      alive = false;
     };
   }, [url]);
 
@@ -117,7 +149,8 @@ function VrmAvatar({ url, currentFrameRef, onUnavailable }: { url: string; curre
     applyMotionToVRM(vrm, currentFrameRef.current, Math.min(delta, 0.05), clock.elapsedTime);
   });
 
-  return vrm ? <primitive object={vrm.scene} /> : null;
+  // Show lightweight procedural avatar immediately while the VRM downloads/parses on first visit
+  return vrm ? <primitive object={vrm.scene} /> : <ProceduralAvatar avatarId={avatarId} currentFrameRef={currentFrameRef} />;
 }
 
 /* -------------------------------------------------------------- GLB Fallback */
@@ -435,6 +468,7 @@ export function Character({ avatarId, vrmUrl, currentFrameRef }: Props) {
     return (
       <VrmAvatar
         url={resolvedUrl}
+        avatarId={avatarId}
         currentFrameRef={currentFrameRef}
         onUnavailable={() => setFailedUrl(resolvedUrl)}
       />
