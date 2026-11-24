@@ -1,10 +1,11 @@
 'use client';
-import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 import { FeedPlayer } from '@/components/FeedPlayer';
+import { EmotionResultCard } from '@/components/EmotionResultCard';
 import { StateMessage } from '@/components/StateMessage';
-import { fetchFeed } from '@/lib/feedData';
-import type { FeedItem } from '@/types/social';
+import { fetchFeed, fetchOwnProfile, fetchProfilePosts } from '@/lib/feedData';
+import type { FeedItem, Profile, PublicPost } from '@/types/social';
 
 type Loaded = { key: string; items: FeedItem[]; snapshot: string } | { key: string; error: string };
 
@@ -13,8 +14,16 @@ export function FeedScreen() {
   const params = useSearchParams();
   const focus = params.get('postId');
   const topic = params.get('topic');
+  const posted = params.get('posted') === '1';
   const key = `${focus ?? ''}|${topic ?? ''}`;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [prevPosted, setPrevPosted] = useState(posted);
+  const [showVibe, setShowVibe] = useState(posted);
+
+  if (posted !== prevPosted) {
+    setPrevPosted(posted);
+    if (posted) setShowVibe(true);
+  }
 
   useEffect(() => {
     let alive = true;
@@ -28,5 +37,57 @@ export function FeedScreen() {
   if (!loaded || loaded.key !== key) return <StateMessage title="Loading feed…" />;
   if ('error' in loaded) return <StateMessage title="Couldn’t load the feed" body={loaded.error} action={{ href: '/feed', label: 'Try again' }} />;
   if (loaded.items.length === 0) return <StateMessage title="Nothing here yet" body="Be the first to post a review." action={{ href: '/record', label: 'Record a post' }} />;
-  return <FeedPlayer key={key} items={loaded.items} paginate={!topic} snapshot={loaded.snapshot} />;
+  return (
+    <>
+      <FeedPlayer key={key} items={loaded.items} paginate={!topic} snapshot={loaded.snapshot} />
+      {showVibe && <PostedVibe onClose={() => setShowVibe(false)} />}
+    </>
+  );
+}
+
+/** Shown once right after publishing: the creator's updated vibe card, ready to share. */
+function PostedVibe({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [mine, setMine] = useState<{ profile: Profile; posts: PublicPost[] } | null>(null);
+
+  const stripPosted = useCallback(() => {
+    const search = new URLSearchParams(window.location.search);
+    if (!search.has('posted')) return;
+    search.delete('posted');
+    const qs = search.toString();
+    router.replace(qs ? `/feed?${qs}` : '/feed', { scroll: false });
+  }, [router]);
+
+  const close = useCallback(() => {
+    stripPosted();
+    onClose();
+  }, [stripPosted, onClose]);
+
+  useEffect(() => {
+    let alive = true;
+    fetchOwnProfile()
+      .then(async (profile) => (profile ? { profile, posts: await fetchProfilePosts(profile.id) } : null))
+      .then((result) => {
+        if (!alive) return;
+        setMine(result);
+        stripPosted();
+      })
+      .catch(() => {
+        if (alive) stripPosted();
+      });
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('keydown', onKey);
+    return () => { alive = false; window.removeEventListener('keydown', onKey); };
+  }, [stripPosted, close]);
+
+  if (!mine) return null;
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Your creator vibe" className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/30 p-4 backdrop-blur-sm sm:items-center" onClick={close}>
+      <div className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        <p className="mb-2 text-center text-sm font-semibold text-white drop-shadow">Posted! Here’s your vibe</p>
+        <EmotionResultCard username={mine.profile.username} posts={mine.posts} />
+        <button type="button" onClick={close} className="acrylic-pill mt-3 min-h-11 w-full text-sm font-semibold">Done</button>
+      </div>
+    </div>
+  );
 }

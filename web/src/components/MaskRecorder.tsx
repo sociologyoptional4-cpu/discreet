@@ -11,6 +11,7 @@ import { extractMotionFrame, hasTrackedFace } from '@/lib/avatarRetargeter';
 import { getFaceLandmarker, getHandLandmarker } from '@/lib/mediapipe';
 import { MOTION_FPS, measureMotionKB } from '@/lib/motionPack';
 import { EmotionSmoother } from '@/lib/emotionDetector';
+import type { EmotionTag } from '@/lib/emotions';
 import type { AvatarId, MaskRecordingPayload, MotionFrame } from '@/types/avatar';
 
 const FRAME_MS = 1000 / MOTION_FPS;
@@ -21,6 +22,8 @@ type ModelsState = 'loading' | 'ready' | 'error';
 type Models = { face: FaceLandmarker; hand: HandLandmarker };
 
 export type MaskRecorderProps = {
+  /** Called when the smoothed live emotion changes (not every frame). */
+  onEmotionChange?: (emotion: EmotionTag) => void;
   /** The shared hidden camera element. No second camera stream is opened here. */
   videoRef: RefObject<HTMLVideoElement | null>;
   /** The shared microphone stream, recorded as it is (no effects). It is only read, never stopped. */
@@ -43,7 +46,7 @@ const round3 = (v: number): number => Math.round(v * 1000) / 1000;
 const pickAudioMime = (): string | undefined => AUDIO_MIME_ORDER.find((t) => MediaRecorder.isTypeSupported(t));
 const formatTime = (s: number): string => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRecordingChange, mirrored = false, initialAvatar, onAvatarChange, leading, trailing }: MaskRecorderProps) {
+export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRecordingChange, mirrored = false, initialAvatar, onAvatarChange, onEmotionChange, leading, trailing }: MaskRecorderProps) {
   const [avatarId, setAvatarId] = useState<AvatarId>(initialAvatar ?? 'cyber_monk');
   const [models, setModels] = useState<ModelsState>('loading');
   const [modelsAttempt, setModelsAttempt] = useState(0);
@@ -76,6 +79,10 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
     onCompleteRef.current = onRecordingComplete;
     onChangeRef.current = onRecordingChange;
   });
+
+  useEffect(() => {
+    onEmotionChange?.(liveEmotion.emotion);
+  }, [liveEmotion.emotion, onEmotionChange]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setLiveEmotion(emotionSmoother.current.update(currentFrameRef.current?.shapes ?? {})), 350);
@@ -243,6 +250,14 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
         <span className="text-sm font-semibold" style={{ color: liveEmotion.color }}>{liveEmotion.label}</span>
       </div>
 
+      <AvatarSelector
+        className="absolute right-3 top-1/2 z-[6] -translate-y-1/2"
+        orientation="vertical"
+        selectedAvatar={avatarId}
+        onSelectAvatar={(id) => { setAvatarId(id); onAvatarChange?.(id); }}
+        disabled={recording}
+      />
+
       {models === 'loading' && (
         <div role="status" className="absolute inset-0 z-[5] flex flex-col items-center justify-center gap-3 bg-[#0A0A0A]/70 px-8 text-center backdrop-blur-sm">
           <LoaderCircle aria-hidden className="size-8 animate-spin motion-reduce:animate-none" />
@@ -271,12 +286,6 @@ export function MaskRecorder({ videoRef, audioStream, onRecordingComplete, onRec
         {finishing && <p role="status" className="rounded-full bg-black/50 px-3 py-1 text-xs backdrop-blur-xl">Packing your clip…</p>}
         {error && <p role="alert" className="rounded-full bg-black/60 px-3 py-1 text-xs text-white/90">{error}</p>}
         {!audioStream && models === 'ready' && <p role="status" className="rounded-full bg-black/60 px-3 py-1 text-xs text-white/90">Waiting for the microphone…</p>}
-
-        <AvatarSelector
-          selectedAvatar={avatarId}
-          onSelectAvatar={(id) => { setAvatarId(id); onAvatarChange?.(id); }}
-          disabled={recording}
-        />
 
         <div className="flex items-center gap-2 text-white/80"><PrismaticLiquidBlob state={recording ? 'active' : 'idle'} size="sm" /><VoiceWaveform stream={audioStream} active={recording} /><button type="button" onClick={() => setShowPrompts((show) => !show)} aria-pressed={showPrompts} className="acrylic-pill min-h-9 px-3 text-xs font-semibold">{showPrompts ? 'Hide prompts' : 'Guided prompts'}</button></div>
 

@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Heart, Play } from 'lucide-react';
+import { AvatarCarousel } from '@/components/AvatarCarousel';
 import { MessageButton } from '@/components/MessageButton';
 import { EmotionResultCard } from '@/components/EmotionResultCard';
 import { StateMessage } from '@/components/StateMessage';
@@ -60,12 +61,7 @@ export function ProfileScreen({ username }: { username: string }) {
 
       <header className="flex flex-col items-center gap-3 pt-2 text-center">
         {username === 'me' && <Link href="/notifications" className="self-end text-sm text-slate-600 underline">Notifications</Link>}
-        <div className="relative flex h-44 w-full items-center justify-center overflow-hidden rounded-[28px] border border-white/80 bg-white/55 shadow-[0_12px_36px_rgba(15,23,42,.07)] backdrop-blur-xl" style={{ backgroundImage: `radial-gradient(70% 100% at 50% 10%, ${accent}2e, transparent 80%)` }}>
-          <span aria-hidden className="absolute left-[-14px] grid size-16 -translate-x-1/2 place-items-center rounded-full border border-white/80 bg-white/70 text-sm font-bold text-slate-400">CM</span>
-          <div role="img" aria-label={`${AVATAR_META[profile.avatar_id].label} avatar`} className="relative z-10 flex size-28 items-center justify-center rounded-full border-2 text-3xl font-bold shadow-[inset_-10px_-12px_20px_rgba(15,23,42,.08),inset_8px_8px_16px_rgba(255,255,255,.9),0_16px_32px_rgba(15,23,42,.12)]" style={{ borderColor: 'white', color: '#263147', background: `radial-gradient(circle at 30% 22%, white, ${accent} 64%, ${accent}bb)` }}>{AVATAR_META[profile.avatar_id].label.split(' ').map((w) => w[0]).join('')}</div>
-          <span aria-hidden className="absolute right-[-14px] grid size-16 translate-x-1/2 place-items-center rounded-full border border-white/80 bg-white/70 text-sm font-bold text-slate-400">NB</span>
-          <span className="absolute bottom-3 left-4 text-[10px] font-semibold tracking-[.16em] text-slate-500">AVATAR STUDIO</span>
-        </div>
+        <AvatarCarousel key={profile.id} initial={profile.avatar_id} />
         <div>
           <h1 className="text-xl font-bold">@{profile.username}</h1>
           <p className="text-xs text-slate-500">{AVATAR_META[profile.avatar_id].label}</p>
@@ -99,7 +95,7 @@ export function ProfileScreen({ username }: { username: string }) {
         {social.error && <p role="alert" className="text-sm text-rose-700">{social.error}</p>}
       </header>
 
-      <EmotionResultCard username={`@${profile.username}`} counts={posts.reduce<Record<string, number>>((acc, post) => { const tag = post.emotion_tag ?? 'chill'; acc[tag] = (acc[tag] ?? 0) + 1; return acc; }, {})} dominant={posts.reduce<string>((best, post, _, all) => { const tag = post.emotion_tag ?? 'chill'; const count = all.filter((entry) => (entry.emotion_tag ?? 'chill') === tag).length; const bestCount = all.filter((entry) => (entry.emotion_tag ?? 'chill') === best).length; return count > bestCount ? tag : best; }, 'joy')} />
+      <EmotionResultCard username={profile.username} posts={posts} />
 
       {posts.length === 0 ? (
         <p className="mt-10 text-center text-sm text-slate-500">No public posts yet.</p>

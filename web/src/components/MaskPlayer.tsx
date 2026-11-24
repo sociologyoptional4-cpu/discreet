@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Pause, Play, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeft, Pause, Play, Volume2, VolumeX } from 'lucide-react';
 import { AvatarStage } from '@/components/AvatarStage';
 import { PublishSheet } from '@/components/PublishSheet';
 import { frameIndexAt } from '@/lib/motionPack';
@@ -16,6 +16,9 @@ type Props = {
   submit?: (payload: RecordedSnapPayload | MaskRecordingPayload) => Promise<void>;
   submitLabel?: string;
 };
+
+const frostedBtn =
+  'flex size-11 items-center justify-center rounded-full backdrop-blur-xl bg-white/75 border border-white/90 shadow-lg text-slate-900 focus-visible:outline-2 focus-visible:outline-slate-900';
 
 export function MaskPlayer({ payload, onRetake, onPublished, submit, submitLabel }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -51,8 +54,6 @@ export function MaskPlayer({ payload, onRetake, onPublished, submit, submitLabel
     else audio.pause();
   };
 
-  const pillButton = 'flex size-11 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white backdrop-blur-xl focus-visible:outline-2 focus-visible:outline-violet-400';
-
   return (
     <section className="fixed inset-0 z-30 flex items-center justify-center bg-[#0A0A0A]" aria-label="Preview your 3D mask snap">
       <div className="relative aspect-[9/16] h-full max-h-dvh w-full max-w-[calc(100dvh*9/16)]">
@@ -69,15 +70,22 @@ export function MaskPlayer({ payload, onRetake, onPublished, submit, submitLabel
         onPause={() => setPlaying(false)}
       />
 
-      <p className="absolute left-1/2 top-[max(0.75rem,env(safe-area-inset-top))] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-xl">
-        {`3D Mask • ${payload.compressedSizeKB} KB (95% smaller than video)`}
-      </p>
+      {/* Top-Left: Frosted Back button */}
+      <button
+        type="button"
+        onClick={onRetake}
+        aria-label="Back to camera"
+        className={`${frostedBtn} absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-40`}
+      >
+        <ArrowLeft aria-hidden className="size-5" />
+      </button>
 
-      <div className="absolute right-3 top-[max(3.5rem,calc(env(safe-area-inset-top)+2.75rem))] flex flex-col gap-2">
-        <button type="button" onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} className={pillButton}>
+      {/* Top-Right: Frosted Play/Pause + Mute toggle */}
+      <div className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-40 flex items-center gap-2">
+        <button type="button" onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} className={frostedBtn}>
           {playing ? <Pause aria-hidden className="size-5" /> : <Play aria-hidden className="size-5" />}
         </button>
-        <button type="button" onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Unmute' : 'Mute'} aria-pressed={muted} className={pillButton}>
+        <button type="button" onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Unmute' : 'Mute'} aria-pressed={muted} className={frostedBtn}>
           {muted ? <VolumeX aria-hidden className="size-5" /> : <Volume2 aria-hidden className="size-5" />}
         </button>
       </div>

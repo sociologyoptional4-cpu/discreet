@@ -82,6 +82,8 @@ function Game4Avatar({ avatarId, currentFrameRef }: Props) {
   const model = useMemo(() => {
     if (!source) return null;
     const copy = cloneRig(source);
+    copy.position.set(0, 0, 0); // drop its spot in the pack, or the centring below aims at the wrong place
+    copy.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(copy);
     const size = box.getSize(new THREE.Vector3());
     const centre = box.getCenter(new THREE.Vector3());
@@ -128,6 +130,7 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
   const handL = useRef<THREE.Group>(null); // the avatar's left hand is on the viewer's right
   const handR = useRef<THREE.Group>(null);
   const root = useRef<THREE.Group>(null);
+  const nextBlink = useRef(3.4); // first idle blink; later ones are rescheduled 3–5 s apart at random
 
   useFrame(({ clock, pointer }, delta) => {
     const frame = currentFrameRef.current;
@@ -170,7 +173,8 @@ export function ProceduralAvatar({ avatarId, currentFrameRef }: Props) {
       root.current.rotation.y = to(root.current.rotation.y, pointer.x * 0.055);
       root.current.rotation.x = to(root.current.rotation.x, -pointer.y * 0.025);
     }
-    const blink = Math.max(0, 1 - Math.abs((t % 4.1) - 3.98) / 0.12);
+    if (t > nextBlink.current + 0.25) nextBlink.current = t + 3 + Math.random() * 2;
+    const blink = Math.max(0, 1 - Math.abs(t - nextBlink.current - 0.1) / 0.1);
     if (!frame) for (const eye of [eyeL, eyeR]) if (eye.current) eye.current.scale.y = to(eye.current.scale.y, 1 - blink * 0.9);
     for (const [hand, p, side, phase] of [[handL, frame?.leftHand, 1, 0], [handR, frame?.rightHand, -1, 1.7]] as const) {
       const g = hand.current;

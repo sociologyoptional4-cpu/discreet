@@ -3,7 +3,9 @@ import { LayoutGroup } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { AvatarPickerRail } from '@/components/AvatarPickerRail';
 import { MaskPlayback } from '@/components/MaskPlayback';
+import type { AvatarId } from '@/types/avatar';
 import { FeedCard } from '@/components/FeedCard';
 import { LiquidWarpCard } from '@/components/LiquidWarpCard';
 import { SwipeBubbleOverlay } from '@/components/SwipeBubbleOverlay';
@@ -18,8 +20,8 @@ import { handleShare } from '@/lib/share';
 import type { FeedItem } from '@/types/social';
 
 const ACTIVE_RATIO = 0.6;
-const PEEK_PX = 18; // how much of the neighbouring cards shows above and below the current one
-const GAP_PX = 6;
+const PEEK_PX = 0;
+const GAP_PX = 0;
 
 type Props = { items: FeedItem[]; paginate: boolean; snapshot: string };
 
@@ -59,6 +61,8 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   const [pausedId, setPausedId] = useState<string | null>(null);
   const [soundOn, setSoundOn] = useState(false); // browsers allow sound only after a tap, so the feed starts muted
   const [note, setNote] = useState<string | null>(null);
+  const [style, setStyle] = useState<{ postId: string; avatarId: AvatarId } | null>(null);
+  const styleFor = (item: FeedItem): AvatarId | null => (style?.postId === item.id ? style.avatarId : item.avatar_id);
   const [swipe, setSwipe] = useState<{ id: string; direction: 'up' | 'down' } | null>(null);
   const previousIndex = useRef<number | null>(null);
   const social = useSocialActions();
@@ -133,8 +137,12 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   return (
     <div className="relative h-dvh w-full bg-black text-white">
       {maskHost && active?.mode === 'mask' && createPortal(
-        <MaskPlayback avatarId={active.avatar_id} motionUrl={active.motion_url} audioUrl={active.media_url} soundOn={soundOn} paused={pausedId === active.id} barRef={maskBar}
-          onPlayback={playback} />, maskHost,
+        <>
+          <MaskPlayback avatarId={styleFor(active)} motionUrl={active.motion_url} audioUrl={active.media_url} soundOn={soundOn} paused={pausedId === active.id} barRef={maskBar}
+            onPlayback={playback} />
+          {/* Try the clip on another character. Local only: the post itself is unchanged. */}
+          <AvatarPickerRail orientation="vertical" className="absolute right-3 top-[18%] z-10 scale-90" selected={styleFor(active) ?? 'cyber_monk'} onSelect={(id) => setStyle({ postId: active.id, avatarId: id })} />
+        </>, maskHost,
       )}
       <LayoutGroup>
         <div
@@ -145,7 +153,9 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
           className={`h-dvh snap-y snap-mandatory overscroll-y-contain [scrollbar-width:none] focus-visible:outline-none ${expanded ? 'overflow-hidden' : 'overflow-y-auto'}`}
           style={{ scrollSnapType: 'y mandatory', paddingBlock: PEEK_PX }}
         >
-          {items.map((item, index) => (
+          {items.map((item, index) => {
+            const near = Math.abs(index - activeIndex) <= 1;
+            return (
             <article
               key={item.id}
               data-post-id={item.id}
@@ -157,11 +167,11 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
               className="relative w-full snap-center snap-always"
               style={{ height: `calc(100dvh - ${PEEK_PX * 2}px)`, marginBottom: GAP_PX }}
             >
-              <LiquidWarpCard axis="vertical" className="absolute inset-0">
+              <LiquidWarpCard axis="vertical" className="absolute inset-0" container={scrollerRef} disabled>
               <FeedCard
                 item={item}
                 active={item.id === activeId}
-                near={Math.abs(index - activeIndex) <= 1}
+                near={near}
                 expanded={item.id === expandedId}
                 paused={pausedId === item.id}
                 soundOn={soundOn}
@@ -177,7 +187,8 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
               />
               </LiquidWarpCard>
             </article>
-          ))}
+            );
+          })}
         </div>
         <SwipeBubbleOverlay trigger={swipe?.id ?? ''} direction={swipe?.direction} />
       </LayoutGroup>

@@ -1,14 +1,14 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Download, Volume2, VolumeX } from 'lucide-react';
-import { PublishSheet, secondaryButton } from '@/components/PublishSheet';
+import { ArrowLeft, Volume2, VolumeX } from 'lucide-react';
+import { PublishSheet } from '@/components/PublishSheet';
 import type { MaskRecordingPayload } from '@/types/avatar';
 import type { RecordedSnapPayload } from '@/types/privacy';
 
 type Props = {
   videoUrl: string;
   onRetake: () => void;
-  /** Reads the finished recording when Post is tapped (blob, mode, duration). Return null to do nothing. */
+  /** Reads the finished recording when Upload is tapped (blob, mode, duration). Return null to do nothing. */
   getSnap: () => Omit<RecordedSnapPayload, 'url' | 'expiry'> | null;
   /** Runs after the post is live, just before the redirect to /feed. */
   onPublished?: (postId: string) => void;
@@ -18,6 +18,9 @@ type Props = {
   /** Picks the download file extension (mp4 vs webm). */
   mimeType?: string;
 };
+
+const frostedBtn =
+  'flex size-11 items-center justify-center rounded-full backdrop-blur-xl bg-white/75 border border-white/90 shadow-lg text-slate-900 focus-visible:outline-2 focus-visible:outline-slate-900';
 
 export function PreviewPlayer({ videoUrl, onRetake, getSnap, onPublished, submit, submitLabel, mimeType = '' }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -46,12 +49,24 @@ export function PreviewPlayer({ videoUrl, onRetake, getSnap, onPublished, submit
         muted={muted}
         className="aspect-[9/16] h-full max-h-dvh w-full max-w-[calc(100dvh*9/16)] object-cover"
       />
+
+      {/* Top-Left: Frosted Back button */}
+      <button
+        type="button"
+        onClick={onRetake}
+        aria-label="Back to camera"
+        className={`${frostedBtn} absolute left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-40`}
+      >
+        <ArrowLeft aria-hidden className="size-5" />
+      </button>
+
+      {/* Top-Right: Frosted Mute/Audio toggle */}
       <button
         type="button"
         onClick={() => setMuted((m) => !m)}
         aria-label={muted ? 'Unmute' : 'Mute'}
         aria-pressed={muted}
-        className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] flex size-11 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white backdrop-blur-xl focus-visible:outline-2 focus-visible:outline-violet-400"
+        className={`${frostedBtn} absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-40`}
       >
         {muted ? <VolumeX aria-hidden className="size-5" /> : <Volume2 aria-hidden className="size-5" />}
       </button>
@@ -65,11 +80,8 @@ export function PreviewPlayer({ videoUrl, onRetake, getSnap, onPublished, submit
         onPublished={onPublished}
         submit={submit}
         submitLabel={submitLabel}
-        extra={
-          <a href={videoUrl} download={`snap.${ext}`} className={secondaryButton}>
-            <Download aria-hidden className="size-4" /> Download Local Copy
-          </a>
-        }
+        downloadUrl={videoUrl}
+        downloadName={`snap.${ext}`}
       />
     </section>
   );

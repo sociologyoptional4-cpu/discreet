@@ -7,6 +7,7 @@ import { ArrowLeft, Ghost, Heart, Search, X } from 'lucide-react';
 import { SentimentVerdictBar, verdictPercentages, type SentimentFilter } from '@/components/SentimentVerdictBar';
 import { AIVisorOrb } from '@/components/AIVisorOrb';
 import { EmotionDiscoveryHub } from '@/components/EmotionDiscoveryHub';
+import { bucketOf, emotionOf, type MeterBucket } from '@/lib/emotions';
 import { LiquidGlassSheet } from '@/components/LiquidGlassSheet';
 import { PrismaticLiquidBlob } from '@/components/PrismaticLiquidBlob';
 import { StateMessage } from '@/components/StateMessage';
@@ -94,7 +95,7 @@ function SearchContent() {
   const [trending, setTrending] = useState<Loaded<{ topics: TrendingTopic[]; thumbs: Record<string, PublicPost[]> }> | null>(null);
   const [results, setResults] = useState<Loaded<SearchResult[]> | null>(null);
   const [filter, setFilter] = useState<SentimentFilter>('all');
-  const [emotionFilter, setEmotionFilter] = useState<'all' | 'joy' | 'angry' | 'surprised' | 'sad' | 'chill'>('all');
+  const [emotionFilter, setEmotionFilter] = useState<MeterBucket | 'all'>('all');
 
   useEffect(() => {
     if (trending !== null) return;
@@ -121,7 +122,7 @@ function SearchContent() {
   const current = results?.key === q ? results : null;
   const reviews = useMemo(() => current?.data ?? [], [current]);
   const counts = useMemo(() => countBySentiment(reviews), [reviews]);
-  const visible = useMemo(() => reviews.filter((r) => (filter === 'all' || r.sentiment === filter) && (emotionFilter === 'all' || (r.emotion_tag ?? 'chill') === emotionFilter)), [reviews, filter, emotionFilter]);
+  const visible = useMemo(() => reviews.filter((r) => (filter === 'all' || r.sentiment === filter) && (emotionFilter === 'all' || bucketOf(emotionOf(r)) === emotionFilter)), [reviews, filter, emotionFilter]);
   // The ring first shows the same thumbnails the cluster had (so they glide into place), then the real search results.
   const ringPosts = useMemo<PublicPost[]>(() => {
     const fromCluster = trending?.data?.thumbs[q];
@@ -186,7 +187,7 @@ function SearchContent() {
             {current?.error && <Notice>{current.error}</Notice>}
             {current?.data && reviews.length > 0 && (
               <LiquidGlassSheet className="mt-5 space-y-4 p-4">
-                <EmotionDiscoveryHub reviews={reviews} selected={emotionFilter} onSelect={setEmotionFilter} />
+                <EmotionDiscoveryHub key={q} reviews={reviews} selected={emotionFilter} onSelect={setEmotionFilter} />
                 <SentimentVerdictBar positiveCount={counts.positive} negativeCount={counts.negative} neutralCount={counts.neutral} activeFilter={filter} onFilterChange={setFilter} />
                 <ul className="flex flex-col gap-3">
                   {visible.map((review) => (

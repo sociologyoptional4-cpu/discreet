@@ -33,11 +33,11 @@ export function SentimentVerdictBar({ positiveCount, negativeCount, neutralCount
   ];
 
   return (
-    <section aria-label="Review verdict" className="rounded-3xl border border-white/15 bg-white/[0.07] p-4 shadow-[0_8px_30px_rgba(0,0,0,0.4)] backdrop-blur-xl">
-      <p className="text-sm font-semibold text-white">{summary}</p>
-      {split && neutralCount > 0 && <p className="mt-0.5 text-xs text-white/60">{neutralCount} neutral not counted in the split</p>}
+    <section aria-label="Review verdict" className="rounded-3xl border border-white/85 bg-white/70 p-4 text-slate-900 shadow-[0_10px_28px_rgba(15,23,42,0.07)] backdrop-blur-xl">
+      <p className="text-sm font-semibold text-slate-900">{summary}</p>
+      {split && neutralCount > 0 && <p className="mt-0.5 text-xs text-slate-500">{neutralCount} neutral not counted in the split</p>}
 
-      <div role="img" aria-label={summary} className="mt-3 flex h-3 w-full overflow-hidden rounded-full bg-white/10">
+      <div role="img" aria-label={summary} className="mt-3 flex h-3 w-full overflow-hidden rounded-full bg-slate-200/70">
         {split && (
           <>
             <div className="h-full bg-emerald-400" style={{ width: `${split.positive}%` }} />
@@ -56,7 +56,7 @@ export function SentimentVerdictBar({ positiveCount, negativeCount, neutralCount
               aria-pressed={on}
               onClick={() => onFilterChange(pill.id)}
               className={`min-h-11 rounded-full px-4 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400 motion-reduce:transition-none ${
-                on ? 'bg-white text-[#0A0A0A]' : 'border border-white/15 bg-white/10 text-white/85 hover:bg-white/15'
+                on ? 'bg-slate-900 text-white' : 'acrylic-pill text-slate-700'
               }`}
             >
               {pill.label} <span className="tabular-nums opacity-70">{pill.count}</span>

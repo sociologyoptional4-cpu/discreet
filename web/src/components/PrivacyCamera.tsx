@@ -4,7 +4,10 @@ import { CameraOff, Lock, LoaderCircle, Square, SwitchCamera, X } from 'lucide-r
 import type { Detection, FaceDetector, ImageSegmenter } from '@mediapipe/tasks-vision';
 import { ModeSelector } from '@/components/ModeSelector';
 import { MaskPlayer } from '@/components/MaskPlayer';
+import { motion, useReducedMotion } from 'framer-motion';
+import { ClayEmotionOrb } from '@/components/ClayEmotionOrb';
 import { MaskRecorder } from '@/components/MaskRecorder';
+import type { EmotionTag } from '@/lib/emotions';
 import { PreviewPlayer } from '@/components/PreviewPlayer';
 import { useCameraStream } from '@/hooks/useCameraStream';
 import { MAX_RECORDING_SECONDS, usePrivacyRecorder } from '@/hooks/usePrivacyRecorder';
@@ -51,6 +54,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
     return () => setImmersive('camera', false);
   }, []);
   const [mode, setMode] = useState<PrivacyMode>('mask');
+  const [liveEmotion, setLiveEmotion] = useState<EmotionTag>('chill'); // from the 3D mask tracker; 2D modes stay chill
   const { videoRef, audioStream, phase: camPhase, facing, notice: camNotice, flip: flipCamera, retry: retryCamera } = useCameraStream({mode});
   const recorder = usePrivacyRecorder({ canvasRef, audioStream });
 
@@ -73,7 +77,31 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   const maskPayloadRef = useRef<MaskRecordingPayload | null>(null);
 
   const showPreview = recorder.recordedUrl !== null && recorder.recordedBlob !== null;
+  const inPreview = showPreview || Boolean(maskPayload);
   const loopActive = camPhase === 'ready' && !showPreview && mode !== 'mask'; // mask mode has its own tracking loop and a WebGL stage
+
+  // iOS Safari / edge-swipe back support: push a lightweight history entry while in preview mode.
+  const previewHistoryRef = useRef(false);
+  useEffect(() => {
+    if (!inPreview) {
+      previewHistoryRef.current = false;
+      return;
+    }
+    if (!previewHistoryRef.current) {
+      window.history.pushState({ preview: true }, '');
+      previewHistoryRef.current = true;
+    }
+    const onPopState = () => {
+      previewHistoryRef.current = false;
+      recorder.resetRecording();
+      if (maskPayloadRef.current) {
+        URL.revokeObjectURL(maskPayloadRef.current.audioUrl);
+        setMaskPayload(null);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [inPreview, recorder]);
 
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { recordingRef.current = recorder.isRecording; }, [recorder.isRecording]);
@@ -198,7 +226,10 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
 
   const selectMode = (next: PrivacyMode) => {
     setMode(next);
-    if (next !== 'mask') setLegacyWanted(true);
+    if (next !== 'mask') {
+      setLegacyWanted(true);
+      setLiveEmotion('chill');
+    }
   };
 
   const retakeMask = () => {
@@ -231,9 +262,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
   return (
     <div className={`viewfinder relative aspect-[9/16] w-full overflow-hidden rounded-[32px] bg-[#0A0A0A] text-white shadow-[0_20px_60px_rgba(15,23,42,.18)] ${className}`}>
       <span aria-hidden className="scan-bracket scan-tl" /><span aria-hidden className="scan-bracket scan-tr" /><span aria-hidden className="scan-bracket scan-bl" /><span aria-hidden className="scan-bracket scan-br" />
-      <div aria-hidden className="pointer-events-none absolute left-1/2 top-0 z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2">
-        <i className="emotion-peek size-7 rounded-full bg-[#7ED957] shadow-[0_4px_14px_#7ED95780]" /><i className="emotion-peek size-9 rounded-full bg-[#9B87F5] shadow-[0_4px_14px_#9B87F580] [animation-delay:220ms]" /><i className="emotion-peek size-6 rounded-full bg-[#7CC6FE] shadow-[0_4px_14px_#7CC6FE80] [animation-delay:420ms]" />
-      </div>
+      <EmotionPeek live={mode === 'mask' ? liveEmotion : 'chill'} />
       {/* Off-screen but still laid out: some browsers stop decoding frames of display:none videos. */}
       <video ref={videoRef} playsInline muted autoPlay aria-hidden tabIndex={-1} className="pointer-events-none absolute left-0 top-0 size-px opacity-0" />
       <canvas
@@ -263,6 +292,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
       {/* Mask 3D: one shared camera and microphone; the recorder and the player never exist at the same time, so there is only ever one WebGL canvas. */}
       {mode === 'mask' && camPhase === 'ready' && !maskPayload && (
         <MaskRecorder
+          onEmotionChange={setLiveEmotion}
           videoRef={videoRef}
           audioStream={audioStream}
           onRecordingComplete={setMaskPayload}
@@ -336,5 +366,28 @@ function Action({ onClick, children }: { onClick: () => void; children: React.Re
     <button type="button" onClick={onClick} className="min-h-11 rounded-full bg-white px-5 text-sm font-semibold text-[#0A0A0A] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400">
       {children}
     </button>
+  );
+}
+
+const PEEK_COMPANIONS: Record<EmotionTag, [EmotionTag, EmotionTag]> = {
+  joy: ['surprised', 'chill'],
+  angry: ['sad', 'chill'],
+  surprised: ['joy', 'chill'],
+  sad: ['chill', 'angry'],
+  chill: ['joy', 'surprised'],
+};
+
+/** Clay emotion blobs peeking over the top edge of the viewfinder. The middle one is the live emotion and pulses. */
+function EmotionPeek({ live }: { live: EmotionTag }) {
+  const reduce = useReducedMotion();
+  const [left, right] = PEEK_COMPANIONS[live];
+  return (
+    <div aria-hidden className="pointer-events-none absolute left-1/2 top-0 z-20 flex -translate-x-1/2 -translate-y-1/2 items-end gap-2">
+      <ClayEmotionOrb emotion={left} size={28} className="emotion-peek opacity-80" />
+      <motion.span key={live} initial={reduce ? false : { scale: 0.6 }} animate={reduce ? undefined : { scale: [1, 1.12, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}>
+        <ClayEmotionOrb emotion={live} size={42} />
+      </motion.span>
+      <ClayEmotionOrb emotion={right} size={24} className="emotion-peek opacity-80 [animation-delay:300ms]" />
+    </div>
   );
 }

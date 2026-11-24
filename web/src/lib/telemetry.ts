@@ -63,9 +63,16 @@ export function startTelemetry() {
   return () => { if (--active === 0) dispose?.(); };
 }
 
+const uuid = (): string =>
+  typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (c) =>
+        (Number(c) ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(c) / 4)))).toString(16),
+      );
+
 export function trackPost(postId: string, event: EventName, value = 1) {
   if (isDemoMode || !active || !Number.isFinite(value)) return;
   if (queue.length >= 2000) queue.shift();
-  queue.push({ id: crypto.randomUUID(), post_id: postId, event_type: event, value });
+  queue.push({ id: uuid(), post_id: postId, event_type: event, value });
   if (queue.length >= BATCH) void flush();
 }
