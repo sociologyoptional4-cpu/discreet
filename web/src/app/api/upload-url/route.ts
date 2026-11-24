@@ -1,64 +1,36 @@
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { getSupabaseAdmin } from '@/lib/supabase';
+import { authenticate, json, rateLimit } from '@/lib/server/request';
+import { publicTarget, storage } from '@/lib/server/storage';
 import { EXPIRY_TIERS } from '@/types/social';
-import type { ExpiryTier } from '@/types/privacy';
 
-const URL_TTL_SECONDS = 5 * 60;
 const ALLOWED_TYPES = new Set(['audio/webm', 'audio/mp4', 'audio/ogg', 'video/webm', 'video/mp4', 'application/json']);
+const MAX_BYTES = 64 * 1024 * 1024;
 
-type Body = { fileName: string; contentType: string; expiryTier: ExpiryTier };
-
-function json(body: unknown, status = 200): Response {
-  return Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
-}
-
-function parseBody(raw: unknown): Body | null {
-  if (typeof raw !== 'object' || raw === null) return null;
-  const { fileName, contentType, expiryTier } = raw as Record<string, unknown>;
-  if (typeof fileName !== 'string' || fileName.length === 0 || fileName.length > 200) return null;
-  if (typeof contentType !== 'string' || !ALLOWED_TYPES.has(contentType.split(';')[0].trim().toLowerCase())) return null;
-  if (typeof expiryTier !== 'string' || !EXPIRY_TIERS.includes(expiryTier as ExpiryTier)) return null;
-  return { fileName, contentType, expiryTier: expiryTier as ExpiryTier };
-}
-
-/** Presigns a 5-minute PUT to Cloudflare R2. Only signed-in users may ask, so the bucket is not an open dropbox. */
 export async function POST(request: Request): Promise<Response> {
-  const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, NEXT_PUBLIC_R2_PUBLIC_URL } = process.env;
-  if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME || !NEXT_PUBLIC_R2_PUBLIC_URL) {
-    return json({ error: 'Storage is not configured.' }, 500);
-  }
-
-  const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-  if (!token) return json({ error: 'Sign in first.' }, 401);
+  const auth = await authenticate(request);
+  if (auth instanceof Response) return auth;
+  const raw: unknown = await request.json().catch(() => null);
+  if (!raw || typeof raw !== 'object') return json({ error: 'Invalid request.' }, 400);
+  const { fileName, contentType, expiryTier, purpose, fileSize } = raw as Record<string, unknown>;
+  const tier = EXPIRY_TIERS.find(t => t === expiryTier);
+  if (!tier || typeof fileName !== 'string' || !fileName || fileName.length > 200 ||
+      typeof contentType !== 'string' || contentType.length > 160 || /[\r\n]/.test(contentType) ||
+      !ALLOWED_TYPES.has(contentType.split(';')[0].trim().toLowerCase()) ||
+      (purpose !== undefined && purpose !== 'snap' && purpose !== 'post') ||
+      typeof fileSize !== 'number' || !Number.isSafeInteger(fileSize) || fileSize < 1 || fileSize > MAX_BYTES ||
+      (purpose === 'snap' && tier !== '1d')) return json({ error: 'Invalid media upload.' }, 400);
+  const limited = await rateLimit(auth.userId, 'upload-url');
+  if (limited) return limited;
+  const file = crypto.randomUUID() + '-' + (fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80) || 'upload');
   try {
-    const { data, error } = await getSupabaseAdmin().auth.getUser(token);
-    if (error || !data.user) return json({ error: 'Sign in first.' }, 401);
+    const { s3, bucket } = storage(purpose === 'snap');
+    const target = purpose === 'snap' ? { key: `snaps/1d/${auth.userId}/${file}` } : publicTarget(auth.userId, tier, file);
+    const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
+      Bucket: bucket, Key: target.key, ContentType: contentType, ContentLength: fileSize,
+    }), { expiresIn: 300, signableHeaders: new Set(['content-type', 'content-length']) });
+    return json({ uploadUrl, ...target });
   } catch {
-    return json({ error: 'Auth is not configured.' }, 500);
-  }
-
-  const body = parseBody(await request.json().catch(() => null));
-  if (!body) return json({ error: 'Invalid request.' }, 400);
-
-  // Only a safe tail of the name survives; the random id makes the key unguessable and unique.
-  const safeName = body.fileName.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '').slice(-80) || 'upload';
-  const key = `${body.expiryTier}/${crypto.randomUUID()}-${safeName}`; // the prefix is what R2 lifecycle rules match
-
-  const s3 = new S3Client({
-    region: 'auto',
-    endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-    credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
-  });
-  try {
-    const uploadUrl = await getSignedUrl(
-      s3,
-      new PutObjectCommand({ Bucket: R2_BUCKET_NAME, Key: key, ContentType: body.contentType }),
-      { expiresIn: URL_TTL_SECONDS },
-    );
-    return json({ uploadUrl, publicUrl: `${NEXT_PUBLIC_R2_PUBLIC_URL.replace(/\/+$/, '')}/${key}`, key });
-  } catch (error) {
-    console.error('upload-url: presign failed', error);
-    return json({ error: 'Could not prepare the upload.' }, 500);
+    return json({ error: 'Could not prepare the upload.' }, 503);
   }
 }
