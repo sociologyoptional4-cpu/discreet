@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nextFeedPage } from '@/lib/feedClient';
 import { withViewerState } from '@/lib/feedData';
+import { feedPlayable, isFeedPlayable } from '@/lib/feed/feedFilter';
 import { resolveMediaUrl } from '@/lib/demoData';
 import { evaluateFeedNudge, type FeedNudgePayload } from '@/lib/feed/aiNudgeEngine';
 import {
@@ -22,8 +23,8 @@ import type { FeedItem, PublicPost } from '@/types/social';
 const topicOf = (item: FeedItem) => item.topic_entity?.trim().toLowerCase();
 
 export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: string) {
-  const [items, setItems] = useState(initial);
-  const [activeId, setActiveId] = useState(initial[0]?.id ?? '');
+  const [items, setItems] = useState(() => feedPlayable(initial));
+  const [activeId, setActiveId] = useState(() => feedPlayable(initial)[0]?.id ?? '');
   const [nudge, setNudge] = useState<FeedNudgePayload | null>(null);
   const index = Math.max(0, items.findIndex((post) => post.id === activeId));
   const active = items[index];
@@ -60,7 +61,7 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
       const page = await nextFeedPage(snapshot, [...seen.current], [...downrank.current], items.at(-1)?.id ?? null, controller.signal);
-      const fresh = page.posts.filter((row) => !seen.current.has(row.id));
+      const fresh = feedPlayable(page.posts).filter((row) => !seen.current.has(row.id));
       const enriched = await withViewerState(fresh);
       if (controller.signal.aborted) return;
       if (!enriched.length || !page.hasMore) exhausted.current = true;
@@ -207,7 +208,7 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
       targetItem = enriched;
     }
 
-    if (!targetItem) return false;
+    if (!targetItem || !isFeedPlayable(targetItem)) return false;
 
     markNudgeAccepted();
     setNudge(null);
