@@ -22,6 +22,9 @@ const postVectors = new Map<string, number[]>();
 let worker: Worker | null = null;
 let workerFailed = false;
 let reqSeq = 0;
+let memTaste: Float32Array | null = null;
+let memLoaded = false;
+let swipesSinceFlush = 0;
 
 function getWorker(): Worker | null {
   if (workerFailed || typeof window === 'undefined' || typeof Worker === 'undefined') return null;
@@ -173,16 +176,24 @@ export async function rankFeedViaLocalPool(limit = 30): Promise<PublicPost[] | n
 }
 
 /**
- * Updates the user's private on-device taste vector + seenIds in IndexedDB on every swipe.
+ * Updates the user's private on-device taste vector in memory and flushes to IndexedDB
+ * every 10 swipes (never blocking the main thread on every swipe).
  */
 export async function recordLocalSwipe(postId: string, reward: number): Promise<void> {
   if (typeof window === 'undefined') return;
-  await appendLocalSeenId(postId);
+  if (!memLoaded) {
+    memLoaded = true;
+    const state = await loadLocalBrainState();
+    memTaste = state.tasteVector;
+  }
   const vec = postVectors.get(postId);
-  if (!vec) return;
-  const state = await loadLocalBrainState();
-  const nextTaste = await updateTasteInWorker(state.tasteVector, vec, reward);
-  if (nextTaste) {
-    await saveLocalTasteVector(nextTaste);
+  if (vec) {
+    memTaste = await updateTasteInWorker(memTaste, vec, reward);
+  }
+  swipesSinceFlush++;
+  if (swipesSinceFlush >= 10) {
+    swipesSinceFlush = 0;
+    await appendLocalSeenId(postId);
+    if (memTaste) await saveLocalTasteVector(memTaste);
   }
 }

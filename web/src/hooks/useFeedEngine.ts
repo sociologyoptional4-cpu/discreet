@@ -170,11 +170,13 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
       paused.current = !media || media.paused || media.readyState < 3;
       tick(!document.hidden, !paused.current);
       trackPost(active.id, 'impression');
-      deepEngine.onSlideSettled(active.id, active.topic_entity, active.creator_username, 'SWIPE_NEXT');
     });
+    const settleTimer = window.setTimeout(() => {
+      if (alive) deepEngine.onSlideSettled(active.id, active.topic_entity, active.creator_username, 'SWIPE_NEXT');
+    }, 220);
     const visibility = () => tick(!document.hidden, !paused.current);
     document.addEventListener('visibilitychange', visibility);
-    return () => { alive = false; document.removeEventListener('visibilitychange', visibility); finish(); };
+    return () => { alive = false; window.clearTimeout(settleTimer); document.removeEventListener('visibilitychange', visibility); finish(); };
   }, [active, finish, tick]);
 
   useEffect(startTelemetry, []);

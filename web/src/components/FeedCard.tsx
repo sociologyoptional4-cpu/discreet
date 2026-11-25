@@ -72,37 +72,31 @@ export function FeedCard(props: FeedCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const touchTrackRef = useRef<{ lastY: number; lastT: number; startT: number }>({ lastY: 0, lastT: 0, startT: 0 });
 
-  // Passive 120Hz touch velocity tracker (zero React state updates during scroll)
+  // Passive touchend velocity tracker (zero touchmove listeners & zero React state during 120Hz scroll)
   useEffect(() => {
     const el = cardRef.current;
     if (!el || !active) return;
     const onStart = (e: TouchEvent) => {
-      const y = e.touches[0]?.clientY ?? 0;
-      const now = performance.now();
-      touchTrackRef.current = { lastY: y, lastT: now, startT: now };
+      touchTrackRef.current = {
+        lastY: e.touches[0]?.clientY ?? 0,
+        lastT: performance.now(),
+        startT: performance.now(),
+      };
     };
-    const onMove = (e: TouchEvent) => {
-      const y = e.touches[0]?.clientY ?? 0;
+    const onEnd = (e: TouchEvent) => {
       const now = performance.now();
-      const dt = now - touchTrackRef.current.lastT;
-      if (dt > 4) {
-        const vel = Math.abs(y - touchTrackRef.current.lastY) / dt;
-        deepEngine.setTouchMetrics({ exitVelocityPxMs: vel });
-        touchTrackRef.current.lastY = y;
-        touchTrackRef.current.lastT = now;
-      }
-    };
-    const onEnd = () => {
-      if (performance.now() - touchTrackRef.current.startT > 350) {
-        deepEngine.setTouchMetrics({ heldScreen: true });
-      }
+      const dt = Math.max(1, now - touchTrackRef.current.startT);
+      const endY = e.changedTouches[0]?.clientY ?? touchTrackRef.current.lastY;
+      const vel = Math.abs(endY - touchTrackRef.current.lastY) / dt;
+      deepEngine.setTouchMetrics({
+        exitVelocityPxMs: vel,
+        heldScreen: dt > 350,
+      });
     };
     el.addEventListener('touchstart', onStart, { passive: true });
-    el.addEventListener('touchmove', onMove, { passive: true });
     el.addEventListener('touchend', onEnd, { passive: true });
     return () => {
       el.removeEventListener('touchstart', onStart);
-      el.removeEventListener('touchmove', onMove);
       el.removeEventListener('touchend', onEnd);
     };
   }, [active]);
