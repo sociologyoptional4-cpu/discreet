@@ -52,6 +52,7 @@ export function LivingPostStudio() {
   const [publishProgress, setPublishProgress] = useState(0);
   const [expiry, setExpiry] = useState<ExpiryTier>('1d');
   const [incog, setIncog] = useState(false);
+  const [refineMode, setRefineMode] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const autoHealedSignatureRef = useRef<string | null>(null);
@@ -71,7 +72,13 @@ export function LivingPostStudio() {
       setGenerating(true);
       setStatusError(null);
       setRuntimeError(null);
-      setStageText(heal ? 'Bug auto-fix ho raha hai...' : 'World design ho raha hai...');
+      setStageText(
+        heal
+          ? heal.errorMsg.startsWith('User refinement request:')
+            ? 'World refine ho raha hai...'
+            : 'Bug auto-fix ho raha hai...'
+          : 'World design ho raha hai...',
+      );
 
       try {
         if (isDemoMode) {
@@ -354,6 +361,27 @@ export function LivingPostStudio() {
           ))}
         </div>
 
+        {/* Refine Toggle */}
+        {html && (
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={refineMode}
+              disabled={generating || publishing}
+              onClick={() => setRefineMode((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition disabled:opacity-50 ${
+                refineMode
+                  ? 'border-violet-400 bg-violet-500/25 text-violet-200'
+                  : 'border-white/15 bg-white/5 text-white/70 hover:bg-white/10'
+              }`}
+            >
+              <Sparkles aria-hidden className="size-3" />
+              <span>Refine current world</span>
+            </button>
+          </div>
+        )}
+
         {/* Prompt Input + Generate Button */}
         <div className="flex items-end gap-2">
           <textarea
@@ -367,11 +395,18 @@ export function LivingPostStudio() {
           <button
             type="button"
             disabled={generating || publishing}
-            onClick={() => void runAgent(prompt)}
+            onClick={() =>
+              void runAgent(
+                prompt,
+                refineMode && html
+                  ? { previousHtml: html, errorMsg: `User refinement request: ${prompt.trim()}` }
+                  : undefined,
+              )
+            }
             className="flex h-11 shrink-0 items-center gap-1.5 rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-4 text-xs font-bold text-white shadow-lg disabled:opacity-50"
           >
             <Wand2 aria-hidden className="size-4" />
-            {generating ? 'Coding...' : 'Generate'}
+            {generating ? 'Coding...' : refineMode ? 'Refine' : 'Generate'}
           </button>
         </div>
 

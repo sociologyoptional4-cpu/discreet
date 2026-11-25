@@ -260,6 +260,28 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [expanded]);
 
+  useEffect(() => {
+    if (expanded || commentsOpen || sharePost) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      let nextIndex: number | null = null;
+      if (event.key === 'ArrowDown' || event.key === 'j') {
+        nextIndex = Math.min(items.length - 1, activeIndex + 1);
+      } else if (event.key === 'ArrowUp' || event.key === 'k') {
+        nextIndex = Math.max(0, activeIndex - 1);
+      }
+      if (nextIndex === null || nextIndex === activeIndex) return;
+      const target = items[nextIndex];
+      if (!target) return;
+      event.preventDefault();
+      scrollerRef.current?.querySelector(`[data-post-id="${CSS.escape(target.id)}"]`)?.scrollIntoView({ behavior: 'smooth' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [expanded, commentsOpen, sharePost, items, activeIndex]);
+
   const flash = (text: string) => {
     setNote(text);
     setTimeout(() => setNote(null), 2500);
@@ -302,10 +324,18 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
     scrollerRef.current?.querySelector(`[data-post-id="${CSS.escape(postId)}"]`)?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const activeCreator = active
+    ? (active.is_incog ? (active.incog_alias ?? 'Anon') : active.creator_username ? `@${active.creator_username}` : 'Creator')
+    : '';
+  const activeAnnouncement = active
+    ? `Now playing: ${active.topic_entity ? `${active.topic_entity} by ` : ''}${activeCreator}`
+    : '';
+
   return (
     <VideoPoolContext.Provider value={videoPool}>
     <div ref={rootRef} onPointerDownCapture={() => { unlockAudio(); wake(); }} onPointerUpCapture={unlockAudio} onTouchStartCapture={unlockAudio} onTouchEndCapture={unlockAudio} onClickCapture={unlockAudio}
       className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-black text-white [--feed-accent-rgb:165_180_252]">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">{activeAnnouncement}</p>
       {maskHost && active?.mode === 'mask' && createPortal(
         <>
           <MaskPlayback avatarId={active.avatar_id} motionUrl={active.motion_url} audioUrl={active.media_url} soundOn={soundOn} paused={pausedId === active.id} barRef={maskBar}

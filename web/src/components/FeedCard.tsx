@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
-import { Play } from 'lucide-react';
+import { Captions, Play } from 'lucide-react';
 import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
 import { CommentOrb, FollowButton, ShareOrb, SoundOrb } from '@/components/feed/FeedControls';
 import type { SocialActions } from '@/hooks/useSocialActions';
@@ -125,6 +125,8 @@ export const FeedCard = memo(function FeedCard(props: FeedCardProps) {
   const missingMedia = !livingPost && !recipe && (!item.media_url || (asStill && stillFailedUrl === item.media_url));
   const fallback = item.transcript || item.ai_summary || 'Media unavailable';
   const [tapHeart, setTapHeart] = useState<{ id: number; x: number; y: number } | null>(null);
+  const [ccOn, setCcOn] = useState(false);
+  const hasTranscript = Boolean(item.transcript?.trim());
   const toastSeq = useRef(0);
   const like = social.likeView(item);
   const creatorId = item.user_id;
@@ -257,6 +259,17 @@ export const FeedCard = memo(function FeedCard(props: FeedCardProps) {
         <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 flex size-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-white/10 backdrop-blur-md"><Play className="size-8 fill-white" /></div>
       )}
 
+      {hasTranscript && ccOn && (
+        <div
+          role="region"
+          aria-label="Captions"
+          onClick={stop}
+          className="pointer-events-auto absolute inset-x-4 bottom-6 z-20 max-h-32 overflow-y-auto rounded-2xl border border-white/20 bg-black/65 px-3.5 py-2.5 text-[13px] leading-relaxed text-white shadow-lg backdrop-blur-md"
+        >
+          {item.transcript}
+        </div>
+      )}
+
       {/* hairline playback progress */}
       <div aria-hidden className="absolute inset-x-0 bottom-0 h-[2px] bg-white/15">
         <div data-feed-progress ref={barRef} className="h-full origin-left bg-white/80" style={{ transform: 'scaleX(0)' }} />
@@ -283,6 +296,22 @@ export const FeedCard = memo(function FeedCard(props: FeedCardProps) {
             <ShareOrb onShare={onShare} />
             {props.onOpenComments && (
               <CommentOrb count={props.commentsCount ?? item.comments_count ?? 0} onOpen={() => { deepEngine.markov.record('OPEN_COMMENTS'); props.onOpenComments?.(); }} />
+            )}
+            {hasTranscript && (
+              <button
+                type="button"
+                onClick={() => setCcOn((v) => !v)}
+                aria-pressed={ccOn}
+                aria-label={ccOn ? 'Hide captions' : 'Show captions'}
+                className={`flex h-10 items-center gap-1 rounded-full border px-2.5 text-xs font-bold backdrop-blur-md transition focus-visible:outline-2 focus-visible:outline-white ${
+                  ccOn
+                    ? 'border-white/70 bg-white text-slate-950 shadow-[0_6px_18px_rgba(0,0,0,.25)]'
+                    : 'border-white/25 bg-white/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_6px_18px_rgba(0,0,0,.25)] hover:bg-white/25'
+                }`}
+              >
+                <Captions aria-hidden className="size-4" />
+                <span>CC</span>
+              </button>
             )}
           </div>
         </div>

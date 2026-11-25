@@ -5,6 +5,7 @@ import {
   appendLocalSeenId,
   loadLocalBrainState,
   saveLocalTasteVector,
+  saveLocalWeights,
 } from '@/lib/localBrain/localBrainStore';
 import {
   rankPoolLocally,
@@ -127,9 +128,25 @@ export async function rankFeedViaLocalPool(limit = 30): Promise<PublicPost[] | n
   ]);
   if (!res.ok) return null;
 
-  const data = (await res.json().catch(() => null)) as { pool?: EdgePoolEntry[] } | null;
+  const data = (await res.json().catch(() => null)) as {
+    pool?: EdgePoolEntry[];
+    weights?: LocalGenomeWeights;
+  } | null;
   const entries = Array.isArray(data?.pool) ? data.pool : [];
   if (entries.length === 0) return null;
+
+  const syncedWeights =
+    data?.weights &&
+    typeof data.weights.wVibe === 'number' &&
+    typeof data.weights.wPheromone === 'number' &&
+    typeof data.weights.wExplore === 'number' &&
+    typeof data.weights.decayLambda === 'number'
+      ? data.weights
+      : null;
+  if (syncedWeights) {
+    void saveLocalWeights(syncedWeights);
+  }
+  const activeWeights = syncedWeights ?? state.weights;
 
   const preFiltered = entries.filter((entry) => !deepEngine.bloom.has(entry.id));
   const activeEntries = preFiltered.length > 0 ? preFiltered : entries;
@@ -154,7 +171,7 @@ export async function rankFeedViaLocalPool(limit = 30): Promise<PublicPost[] | n
     });
   }
 
-  let orderedIds = await rankInWorker(lightPool, state.tasteVector, state.seenIds, state.weights);
+  let orderedIds = await rankInWorker(lightPool, state.tasteVector, state.seenIds, activeWeights);
   // Apply Hebbian cross-tag affinity boost when active tag has wired neighbors
   const tagMap = new Map(lightPool.map((p) => [p.id, p.tag]));
   if (orderedIds.some((id) => deepEngine.getHebbianBoost(tagMap.get(id)) > 0)) {

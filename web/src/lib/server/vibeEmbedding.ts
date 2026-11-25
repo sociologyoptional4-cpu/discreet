@@ -3,6 +3,20 @@ import { computeSemanticHashVector384, formatPgVector, l2Normalize, VIBE_VECTOR_
 import { getSupabaseAdmin } from '@/lib/server/admin';
 
 /**
+ * Takes the first 384 dimensions of a 768-dim Gemini embedding (Matryoshka truncation)
+ * and L2-normalizes the resulting vector for `vibe_embedding`.
+ */
+export function sliceAndNormalize384(vec768: readonly number[]): Float32Array {
+  const sliced = new Float32Array(VIBE_VECTOR_DIM);
+  const len = Math.min(vec768.length, VIBE_VECTOR_DIM);
+  for (let i = 0; i < len; i++) {
+    const v = vec768[i];
+    sliced[i] = typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  }
+  return l2Normalize(sliced);
+}
+
+/**
  * Generates a normalized 384-dimensional vibe embedding for semantic clustering.
  * Uses Gemini Embedding (`outputDimensionality: 384`) with a deterministic local semantic-hash fallback.
  */

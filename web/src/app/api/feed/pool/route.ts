@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { parsePgVector } from '@/lib/brain/tasteVector';
+import { DEFAULT_LOCAL_WEIGHTS, type LocalGenomeWeights } from '@/lib/localBrain/localRanker';
 import { quantizeToInt8 } from '@/lib/localBrain/quantizedVector';
 import { getSupabaseAdmin } from '@/lib/server/admin';
 import type { PublicPost } from '@/types/social';
@@ -28,7 +29,7 @@ export async function GET() {
     const posts = publicRows as PublicPost[];
     const ids = posts.map((p) => p.id);
 
-    const [{ data: brainRows }, { data: metricRows }] = await Promise.all([
+    const [{ data: brainRows }, { data: metricRows }, { data: genomeRows }] = await Promise.all([
       ids.length > 0
         ? admin
             .from('posts')
@@ -38,7 +39,29 @@ export async function GET() {
       ids.length > 0
         ? admin.from('post_metrics').select('post_id, shares, rewatches').in('post_id', ids)
         : Promise.resolve({ data: [] }),
+      admin
+        .from('algo_genomes')
+        .select('w_vibe, w_pheromone, w_explore, decay_lambda')
+        .eq('is_active', true)
+        .order('cumulative_reward', { ascending: false })
+        .limit(1),
     ]);
+
+    const topGenome = (genomeRows as Array<{
+      w_vibe: number | null;
+      w_pheromone: number | null;
+      w_explore: number | null;
+      decay_lambda: number | null;
+    }> | null)?.[0];
+
+    const weights: LocalGenomeWeights = topGenome
+      ? {
+          wVibe: Number(topGenome.w_vibe ?? DEFAULT_LOCAL_WEIGHTS.wVibe),
+          wPheromone: Number(topGenome.w_pheromone ?? DEFAULT_LOCAL_WEIGHTS.wPheromone),
+          wExplore: Number(topGenome.w_explore ?? DEFAULT_LOCAL_WEIGHTS.wExplore),
+          decayLambda: Number(topGenome.decay_lambda ?? DEFAULT_LOCAL_WEIGHTS.decayLambda),
+        }
+      : { ...DEFAULT_LOCAL_WEIGHTS };
 
     const brainMap = new Map<
       string,
@@ -97,7 +120,7 @@ export async function GET() {
     });
 
     return NextResponse.json(
-      { pool, generatedAt: Date.now() },
+      { pool, weights, generatedAt: Date.now() },
       {
         headers: {
           'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',

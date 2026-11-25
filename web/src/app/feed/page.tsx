@@ -9,6 +9,7 @@ export const viewport: Viewport = { themeColor: '#0A0A0A', viewportFit: 'cover' 
 export default function FeedPage() {
   return (
     <main className="bg-[#0A0A0A]">
+      <link rel="preload" href="/api/feed/pool" as="fetch" crossOrigin="anonymous" />
       <Suspense fallback={<StateMessage title="Loading feed…" />}>
         <FeedScreen />
       </Suspense>

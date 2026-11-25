@@ -27,7 +27,6 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
   const [nudge, setNudge] = useState<FeedNudgePayload | null>(null);
   const index = Math.max(0, items.findIndex((post) => post.id === activeId));
   const active = items[index];
-  const next = items[index + 1];
   const downrank = useRef(new Set<string>());
   const seen = useRef(new Set(initial.map((post) => post.id)));
   const skips = useRef<string[]>([]);
@@ -249,20 +248,6 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
 
     return true;
   }, [activeId, items, select]);
-
-  useEffect(() => {
-    if (!next || isDemoMode) return;
-    const control = new AbortController();
-    if (next.media_url) void fetch(resolveMediaUrl(next.media_url), {
-      headers: { Range: 'bytes=0-131071' }, signal: control.signal, cache: 'force-cache', credentials: 'omit',
-    }).then(async (response) => {
-      if (response.status === 206) await response.arrayBuffer();
-      else await response.body?.cancel();
-    }).catch(() => {});
-    if (next.motion_url) void fetch(next.motion_url, { signal: control.signal, cache: 'force-cache', credentials: 'omit' })
-      .then((response) => response.arrayBuffer()).catch(() => {});
-    return () => control.abort();
-  }, [next]);
 
   return { items, index, active, select, notInterested, playback, nudge, dismissNudge, jumpToPost, getSessionContext };
 }

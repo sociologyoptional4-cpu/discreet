@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/ai-creators",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/brain/evolve",
+      "schedule": "0 */6 * * *"
     }
   ]
 }

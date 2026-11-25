@@ -14,6 +14,7 @@ export interface PoolPostItem {
 export interface RankPoolOptions {
   seenFilter?: { has: (id: string) => boolean };
   hebbianBoostOf?: (tag: string) => number;
+  downrankTags?: ReadonlySet<string>;
 }
 
 export interface LocalGenomeWeights {
@@ -57,7 +58,9 @@ export function rankPoolLocally<T extends PoolPostItem>(
       const decayed =
         Math.max(0, post.pheromoneRaw) /
         Math.pow(Math.max(0, post.ageHours) + 2, weights.decayLambda);
-      const pheromone = 1 - Math.exp(-decayed);
+      const rawPheromone = 1 - Math.exp(-decayed);
+      const pheromone =
+        post.tag && options?.downrankTags?.has(post.tag) ? rawPheromone * 0.15 : rawPheromone;
 
       // Fast local exploration jitter weighted by uncertainty
       const mean = post.alpha / Math.max(1, post.alpha + post.beta);

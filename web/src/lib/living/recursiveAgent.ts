@@ -38,7 +38,8 @@ STRICT RULES:
 4. Keep total size compact (under 20 KB).
 5. NEVER use fetch, XMLHttpRequest, WebSocket, localStorage, sessionStorage, document.cookie, eval, Function(), <iframe, or any http:// / https:// URLs.
 6. Mobile 60fps performance: cap devicePixelRatio at 2, handle window resize cleanly, keep particle counts <= 180 so each frame renders under 8ms, set touch-action: none on the canvas, and show a subtle hint like "Tap or drag" that fades out after first interaction.
-7. iOS Safari WebAudio rule: if the prompt includes sound effects (rain, thunder, synth), create AudioContext lazily inside pointerdown/touchstart inside try/catch, and ALWAYS call if (audioCtx.state === 'suspended') audioCtx.resume(); before playing.`;
+7. iOS Safari WebAudio rule: if the prompt includes sound effects (rain, thunder, synth), create AudioContext lazily inside pointerdown/touchstart inside try/catch, and ALWAYS call if (audioCtx.state === 'suspended') audioCtx.resume(); before playing.
+8. Accessibility & reduced motion: respect @media (prefers-reduced-motion: reduce) (and window.matchMedia('(prefers-reduced-motion: reduce)').matches) by slowing or pausing intense flashes or rapid motion.`;
 
 /**
  * Strips markdown code fences and any non-HTML preamble/postscript around an HTML document.

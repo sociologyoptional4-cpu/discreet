@@ -1,7 +1,7 @@
 'use client';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type * as THREE from 'three';
 import { GLBMotionAvatar } from '@/components/playable/GLBMotionAvatar';
@@ -199,6 +199,7 @@ const FONT_CLASS: Record<PlayableFontStyle, string> = { serif: 'font-serif', san
  * R3F releases the context when this unmounts. Scrolling stays vertical until the viewer taps Explore 3D.
  */
 export default function PlayableSceneCanvas({ recipe, isActive, isMuted }: Props) {
+  const reduceMotion = useReducedMotion();
   const [exploring, setExploring] = useState(false);
   const [motionTrack, setMotionTrack] = useState<DecodedMotionTrack | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -262,7 +263,7 @@ export default function PlayableSceneCanvas({ recipe, isActive, isMuted }: Props
         )}
         {exploring
           ? <OrbitControls enableZoom={false} enablePan={false} target={[0, LOOK_AT_Y, 0]} minPolarAngle={Math.PI / 4} maxPolarAngle={Math.PI / 2.05} />
-          : <AutoOrbit speed={camera.autoOrbitSpeed} />}
+          : <AutoOrbit speed={reduceMotion ? 0 : camera.autoOrbitSpeed} />}
       </Canvas>
 
       {textOverlay && (
