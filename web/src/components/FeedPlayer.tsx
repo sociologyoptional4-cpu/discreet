@@ -9,7 +9,6 @@ import { fetchMotionTrack } from '@/lib/mocap/motionCodec';
 import type { AvatarId } from '@/types/avatar';
 import { FeedCard } from '@/components/FeedCard';
 import { LiquidWarpCard } from '@/components/LiquidWarpCard';
-import { SwipeBubbleOverlay } from '@/components/SwipeBubbleOverlay';
 import { ComboBurstLayer, useComboBurst } from '@/components/chat/EmojiReactionSystem';
 import { AIFeedNudge, type FeedNudge } from '@/components/feed/AIFeedNudge';
 import { AuroraEdgeGlow } from '@/components/feed/AuroraEdgeGlow';
@@ -86,7 +85,6 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   const [note, setNote] = useState<string | null>(null);
   const [style, setStyle] = useState<{ postId: string; avatarId: AvatarId } | null>(null);
   const styleFor = (item: FeedItem): AvatarId | null => (style?.postId === item.id ? style.avatarId : item.avatar_id);
-  const [swipe, setSwipe] = useState<{ id: string; direction: 'up' | 'down' } | null>(null);
   const previousIndex = useRef<number | null>(null);
   const social = useSocialActions();
   const burst = useComboBurst();
@@ -124,7 +122,6 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
     if (activeIndex < 0) return;
     if (previousIndex.current !== null && previousIndex.current !== activeIndex && activeId) {
       const now = Date.now();
-      setSwipe({ id: `${activeId}-${now}`, direction: activeIndex > previousIndex.current ? 'up' : 'down' });
       setPulse(now);
       setPickerOpen(false);
       // Soft haptic vibration + subtle tactile audio cue on every card swipe
@@ -302,7 +299,6 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
             );
           })}
         </div>
-        <SwipeBubbleOverlay trigger={swipe?.id ?? ''} direction={swipe?.direction} />
       </LayoutGroup>
       <AuroraEdgeGlow emotion={active?.emotion_tag} pulse={pulse} />
       <FeedGamificationHUD progress={(xp % LEVEL_XP) / LEVEL_XP} milestone={milestone} />

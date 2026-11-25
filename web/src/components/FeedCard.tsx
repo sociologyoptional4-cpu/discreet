@@ -3,7 +3,6 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Play } from 'lucide-react';
-import { SwipeBubbleOverlay } from '@/components/SwipeBubbleOverlay';
 import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
 import { CommentOrb, FollowButton, ShareOrb, SoundOrb } from '@/components/feed/FeedControls';
 import type { SocialActions } from '@/hooks/useSocialActions';
@@ -62,7 +61,6 @@ export function FeedCard(props: FeedCardProps) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const missingMedia = !item.media_url || failedUrl === item.media_url;
   const fallback = item.transcript || item.ai_summary || 'Media unavailable';
-  const [likeBurst, setLikeBurst] = useState(0);
   const [tapHeart, setTapHeart] = useState<{ id: number; x: number; y: number } | null>(null);
   const toastSeq = useRef(0);
   const like = social.likeView(item);
@@ -83,7 +81,6 @@ export function FeedCard(props: FeedCardProps) {
     if (emoji === HEART) {
       void social.toggleLike(item.id, like.liked);
       if (like.liked) return; // unliking is not a reaction
-      setLikeBurst((n) => n + 1);
     }
     onReact(emoji, x, y);
   };
@@ -135,7 +132,6 @@ export function FeedCard(props: FeedCardProps) {
       tabIndex={0}
       aria-label={`Post ${item.topic_entity ? `about ${item.topic_entity}` : ''} by ${name}`}
     >
-      <SwipeBubbleOverlay trigger={likeBurst} kind="like" />
       <AnimatePresence>
         {tapHeart && (
           <motion.div
