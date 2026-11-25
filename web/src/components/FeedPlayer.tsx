@@ -89,7 +89,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
   const [pausedId, setPausedId] = useState<string | null>(null);
-  const [soundOn, setSoundOn] = useState(false); // browsers allow sound only after a tap, so the feed starts muted
+  const [soundOn, setSoundOn] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const previousIndex = useRef<number | null>(null);
   const social = useSocialActions();
@@ -249,7 +249,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
           style={{ scrollSnapType: 'y mandatory', paddingBlock: PEEK_PX }}
         >
           {items.map((item, index) => {
-            const near = index >= activeIndex - 1 && index <= activeIndex + 2;
+            const near = Math.abs(index - activeIndex) <= 1;
             return (
             <article
               key={item.id}
@@ -267,6 +267,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
                 item={item}
                 active={item.id === activeId}
                 near={near}
+                isNext={index === activeIndex + 1}
                 expanded={item.id === expandedId}
                 paused={pausedId === item.id}
                 soundOn={soundOn}

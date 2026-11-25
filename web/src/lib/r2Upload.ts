@@ -56,6 +56,7 @@ function putFile(url: string, file: Upload, onBytes: (loaded: number) => void): 
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', url);
     xhr.setRequestHeader('Content-Type', file.contentType); // must match what was signed
+    xhr.setRequestHeader('Cache-Control', 'public, max-age=31536000, immutable');
     xhr.upload.onprogress = (event) => onBytes(event.loaded);
     xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status}).`)));
     xhr.onerror = () => reject(new Error('Upload failed. Check your connection and try again.'));

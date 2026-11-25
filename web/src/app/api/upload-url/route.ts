@@ -4,7 +4,18 @@ import { authenticate, json, rateLimit } from '@/lib/server/request';
 import { publicTarget, storage } from '@/lib/server/storage';
 import { EXPIRY_TIERS } from '@/types/social';
 
-const ALLOWED_TYPES = new Set(['audio/webm', 'audio/mp4', 'audio/ogg', 'video/webm', 'video/mp4', 'application/json']);
+const ALLOWED_TYPES = new Set([
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg',
+  'video/webm',
+  'video/mp4',
+  'image/webp',
+  'image/jpeg',
+  'image/png',
+  'application/json',
+]);
+const EDGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const MAX_BYTES = 64 * 1024 * 1024;
 
 export async function POST(request: Request): Promise<Response> {
@@ -27,8 +38,12 @@ export async function POST(request: Request): Promise<Response> {
     const { s3, bucket } = storage(purpose === 'snap');
     const target = purpose === 'snap' ? { key: `snaps/1d/${auth.userId}/${file}` } : publicTarget(auth.userId, tier, file);
     const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
-      Bucket: bucket, Key: target.key, ContentType: contentType, ContentLength: fileSize,
-    }), { expiresIn: 300, signableHeaders: new Set(['content-type', 'content-length']) });
+      Bucket: bucket,
+      Key: target.key,
+      ContentType: contentType,
+      ContentLength: fileSize,
+      CacheControl: EDGE_CACHE_CONTROL,
+    }), { expiresIn: 300, signableHeaders: new Set(['content-type', 'content-length', 'cache-control']) });
     return json({ uploadUrl, ...target });
   } catch {
     return json({ error: 'Could not prepare the upload.' }, 503);

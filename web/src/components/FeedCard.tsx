@@ -15,8 +15,9 @@ import type { FeedItem } from '@/types/social';
 export type FeedCardProps = {
   item: FeedItem;
   active: boolean;
-  /** Close enough to the screen that a video should be loaded. */
+  /** Close enough to the screen that a video should be loaded (`Math.abs(index - activeIndex) <= 1`). */
   near: boolean;
+  isNext?: boolean;
   expanded: boolean;
   paused: boolean;
   soundOn: boolean;
@@ -160,7 +161,19 @@ export function FeedCard(props: FeedCardProps) {
             <div className="size-full" style={{ background: STUDIO_BACKDROP[item.avatar_id ?? 'cyber_monk'] }} />
           )
         ) : near && !missingMedia ? (
-          <PostVideo src={item.media_url} onFailure={() => setFailedUrl(item.media_url)} active={active} paused={paused} soundOn={soundOn} barRef={barRef} />
+          <PostVideo
+            src={item.media_url}
+            thumbnailUrl={item.thumbnail_url}
+            onFailure={() => setFailedUrl(item.media_url)}
+            active={active}
+            isNext={Boolean(props.isNext)}
+            paused={paused}
+            soundOn={soundOn}
+            barRef={barRef}
+          />
+        ) : item.thumbnail_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.thumbnail_url} alt="" className="size-full object-cover" loading="lazy" />
         ) : null}
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-gradient-to-b from-black/60 via-black/25 to-transparent" />
@@ -204,38 +217,98 @@ export function FeedCard(props: FeedCardProps) {
   );
 }
 
-/** Plays only while active; neighbouring cards keep a paused, preloaded video so a swipe starts instantly. */
-function PostVideo({ src, active, paused, soundOn, barRef, onFailure }: { onFailure: () => void; src: string; active: boolean; paused: boolean; soundOn: boolean; barRef: RefObject<HTMLElement | null> }): ReactNode {
+/** Strict 3-slot virtualized video player with zero-flicker poster handoff & decoder cleanup. */
+function PostVideo({
+  src,
+  thumbnailUrl,
+  active,
+  isNext,
+  paused,
+  soundOn,
+  barRef,
+  onFailure,
+}: {
+  onFailure: () => void;
+  src: string;
+  thumbnailUrl?: string | null;
+  active: boolean;
+  isNext: boolean;
+  paused: boolean;
+  soundOn: boolean;
+  barRef: RefObject<HTMLElement | null>;
+}): ReactNode {
   const ref = useRef<HTMLVideoElement>(null);
+  const [readyToShow, setReadyToShow] = useState(false);
+
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
     video.muted = !soundOn || !active;
   }, [active, soundOn]);
+
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
-    if (active && !paused) void video.play().catch(() => {});
-    else video.pause();
-  }, [active, paused, src]);
+    if (active && !paused) {
+      video.muted = !soundOn;
+      video.play().catch(() => {
+        video.muted = true;
+        video.play().catch(() => {});
+      });
+    } else {
+      video.pause();
+    }
+  }, [active, paused, soundOn, src]);
+
+  useEffect(() => {
+    const video = ref.current;
+    return () => {
+      if (!video) return;
+      try {
+        video.pause();
+        video.removeAttribute('src');
+        video.src = '';
+        video.load();
+      } catch {
+        // ignore cleanup errors
+      }
+    };
+  }, []);
+
   return (
-    <video
-      ref={ref}
-      src={src}
-      onError={onFailure}
-      playsInline
-      loop
-      autoPlay={active}
-      muted={!soundOn || !active}
-      preload="auto"
-      crossOrigin={corsSafe(src) ? 'anonymous' : undefined}
-      className="size-full object-cover"
-      onTimeUpdate={(e) => {
-        const bar = barRef.current;
-        const { currentTime, duration } = e.currentTarget;
-        if (bar && Number.isFinite(duration) && duration > 0) bar.style.transform = `scaleX(${Math.min(1, currentTime / duration)})`;
-      }}
-    />
+    <div className="relative size-full bg-black">
+      {thumbnailUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={thumbnailUrl}
+          alt=""
+          className={`pointer-events-none absolute inset-0 size-full object-cover transition-opacity duration-200 ${
+            readyToShow && active ? 'opacity-0' : 'opacity-100'
+          }`}
+        />
+      )}
+      <video
+        ref={ref}
+        src={src}
+        onError={onFailure}
+        onPlaying={() => setReadyToShow(true)}
+        onLoadedData={(e) => {
+          if (e.currentTarget.readyState >= 3) setReadyToShow(true);
+        }}
+        playsInline
+        loop
+        autoPlay={active}
+        muted={!soundOn || !active}
+        preload={active || isNext ? 'auto' : 'metadata'}
+        crossOrigin={corsSafe(src) ? 'anonymous' : undefined}
+        className="relative size-full object-cover"
+        onTimeUpdate={(e) => {
+          const bar = barRef.current;
+          const { currentTime, duration } = e.currentTarget;
+          if (bar && Number.isFinite(duration) && duration > 0) bar.style.transform = `scaleX(${Math.min(1, currentTime / duration)})`;
+        }}
+      />
+    </div>
   );
 }
 

@@ -13,6 +13,7 @@ export type PublicPost = {
   mode: PrivacyMode;
   avatar_id: AvatarId | null;
   media_url: string;
+  thumbnail_url?: string | null;
   motion_url: string | null;
   duration_sec: number;
   is_incog: boolean;
