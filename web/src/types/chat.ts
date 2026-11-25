@@ -42,7 +42,7 @@ export type SharedPostPreview = {
   id: string;
   thumbnail_url: string | null;
   caption: string | null;
-  post_format: 'video' | 'image' | 'recipe_avatar' | 'recipe_shayari';
+  post_format: 'video' | 'image' | 'recipe_avatar' | 'recipe_shayari' | 'living_post';
 };
 
 /** A message as the chat API returns it. Not the same as the row-shaped `ChatMessage` the live thread screen keeps. */

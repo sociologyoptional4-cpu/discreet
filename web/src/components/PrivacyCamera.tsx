@@ -976,6 +976,7 @@ export function PrivacyCamera({ onPublished, onSubmitMedia, submitLabel, onClose
             category={lensCategory}
             onCategoryChange={setLensCategory}
             onGallery={() => galleryInputRef.current?.click()}
+            onOpenLiving={!submitMedia ? () => router.push('/create/living') : undefined}
             snapCount={snapLenses.length}
             studioCount={studioItems.length}
           />

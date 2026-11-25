@@ -15,7 +15,7 @@ export type PublicPost = {
   media_url: string;
   thumbnail_url?: string | null;
   /** Present once supabase/playable_scenes_module1.sql has been run; absent means a plain video post. */
-  post_format?: 'video' | 'image' | 'recipe_avatar' | 'recipe_shayari';
+  post_format?: 'video' | 'image' | 'recipe_avatar' | 'recipe_shayari' | 'living_post';
   recipe_data?: unknown;
   motion_url: string | null;
   duration_sec: number;
@@ -64,7 +64,7 @@ export type ProfilePostSummary = {
   id: string;
   thumbnail_url: string | null;
   media_url: string;
-  post_format: 'video' | 'image' | 'recipe_avatar' | 'recipe_shayari';
+  post_format: 'video' | 'image' | 'recipe_avatar' | 'recipe_shayari' | 'living_post';
   caption: string | null;
   comments_count: number;
   expires_at: string | null;

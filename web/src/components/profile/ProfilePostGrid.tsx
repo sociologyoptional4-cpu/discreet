@@ -9,7 +9,11 @@ import type { ProfilePostSummary } from '@/types/social';
 
 type Tab = 'posts' | 'burners';
 
-const FORMAT_LABEL: Partial<Record<ProfilePostSummary['post_format'], string>> = { recipe_avatar: 'Avatar', recipe_shayari: 'Shayari' };
+const FORMAT_LABEL: Partial<Record<ProfilePostSummary['post_format'], string>> = {
+  recipe_avatar: 'Avatar',
+  recipe_shayari: 'Shayari',
+  living_post: 'Living ✨',
+};
 
 /** Current time, refreshed each minute, set after mount so server and client markup agree. */
 function useNow(): number | null {

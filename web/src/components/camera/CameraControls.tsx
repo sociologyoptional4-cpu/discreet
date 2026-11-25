@@ -1,6 +1,6 @@
 'use client';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Camera, ChevronDown, Gauge, Grid3x3, Hourglass, ImagePlus, SmilePlus, Sparkles, Timer, Wand2, Webcam, Zap, ZapOff, type LucideIcon } from 'lucide-react';
+import { Camera, ChevronDown, Code2, Gauge, Grid3x3, Hourglass, ImagePlus, SmilePlus, Sparkles, Timer, Wand2, Webcam, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 /** Smoked glass: keeps the live camera feed visible behind every control. */
@@ -74,14 +74,15 @@ export function ZoomBadge({ value }: { value: number }) {
 
 export type LensCategory = 'snap' | 'studio';
 
-/** Slim footer under the shutter: Gallery import plus the two lens sets. */
-export function CameraCategoryStrip({ category, onCategoryChange, onGallery, snapCount, studioCount }: {
-  category: LensCategory; onCategoryChange: (c: LensCategory) => void; onGallery: () => void; snapCount: number; studioCount: number;
+/** Slim footer under the shutter: Gallery import plus the two lens sets and Living AI creator. */
+export function CameraCategoryStrip({ category, onCategoryChange, onGallery, onOpenLiving, snapCount, studioCount }: {
+  category: LensCategory; onCategoryChange: (c: LensCategory) => void; onGallery: () => void; onOpenLiving?: () => void; snapCount: number; studioCount: number;
 }) {
   const tabs: { key: string; label: string; Icon: LucideIcon; active: boolean; onClick: () => void; disabled?: boolean }[] = [
     { key: 'gallery', label: 'Gallery', Icon: ImagePlus, active: false, onClick: onGallery },
     { key: 'snap', label: 'Snap AR', Icon: Sparkles, active: category === 'snap', onClick: () => onCategoryChange('snap'), disabled: snapCount === 0 },
     { key: 'studio', label: 'Studio FX', Icon: Wand2, active: category === 'studio', onClick: () => onCategoryChange('studio'), disabled: studioCount === 0 },
+    ...(onOpenLiving ? [{ key: 'living', label: 'Living AI', Icon: Code2, active: false, onClick: onOpenLiving }] : []),
   ];
   return (
     <nav aria-label="Lens sets" className={`flex items-center justify-center gap-0.5 rounded-full p-1 ${GLASS}`}>

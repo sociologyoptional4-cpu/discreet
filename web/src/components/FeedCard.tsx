@@ -14,11 +14,13 @@ import { useVideoUpscaler } from '@/hooks/useVideoUpscaler';
 import { isCorsSafeMediaUrl } from '@/lib/media/corsSafe';
 import { isImageUrl } from '@/lib/media/mediaKind';
 import { attachVideo, markLive, playVideo, POOL_SIZE, setVideoMuted, VideoPoolContext, watchSilence } from '@/lib/media/videoPool';
+import { parseLivingPostRecipe } from '@/lib/living/livingPostValidator';
 import { parsePlayableRecipe } from '@/types/playable';
 import type { FeedItem } from '@/types/social';
 
 /** The 3D engine loads only when an active slide actually is a playable scene. */
 const PlayableSceneCanvas = dynamic(() => import('@/components/playable/PlayableSceneCanvas'), { ssr: false });
+const LivingPostFrame = dynamic(() => import('@/components/living/LivingPostFrame'), { ssr: false });
 
 export type FeedCardProps = {
   item: FeedItem;
@@ -69,12 +71,16 @@ export function FeedCard(props: FeedCardProps) {
     () => (item.post_format === 'recipe_avatar' || item.post_format === 'recipe_shayari' ? parsePlayableRecipe(item.recipe_data) : null),
     [item.post_format, item.recipe_data],
   );
+  const livingPost = useMemo(
+    () => (item.post_format === 'living_post' ? parseLivingPostRecipe(item.recipe_data) : null),
+    [item.post_format, item.recipe_data],
+  );
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [stillFailedUrl, setStillFailedUrl] = useState<string | null>(null);
   // Photo posts are still images. A video that fails to load is tried as an image once (older photo posts were saved
   // under a video file name), and only then reported as unavailable.
   const asStill = isImageUrl(item.media_url) || failedUrl === item.media_url;
-  const missingMedia = !item.media_url || (asStill && stillFailedUrl === item.media_url);
+  const missingMedia = !livingPost && !recipe && (!item.media_url || (asStill && stillFailedUrl === item.media_url));
   const fallback = item.transcript || item.ai_summary || 'Media unavailable';
   const [tapHeart, setTapHeart] = useState<{ id: number; x: number; y: number } | null>(null);
   const toastSeq = useRef(0);
@@ -168,7 +174,16 @@ export function FeedCard(props: FeedCardProps) {
         )}
       </AnimatePresence>
       <div data-mask-slot className="absolute inset-0">
-        {recipe ? (
+        {livingPost ? (
+          <LivingPostFrame
+            html={livingPost.inlineHtml}
+            livingHtmlUrl={livingPost.livingHtmlUrl}
+            thumbnailUrl={item.thumbnail_url}
+            isActive={active && !paused}
+            prompt={livingPost.prompt}
+            postId={item.id}
+          />
+        ) : recipe ? (
           active ? (
             <PlayableSceneCanvas recipe={recipe} isActive={active} isMuted={!soundOn} />
           ) : item.thumbnail_url ? (

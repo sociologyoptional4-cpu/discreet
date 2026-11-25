@@ -28,6 +28,8 @@ import { primeAudio } from '@/lib/chat/spatialAudio';
 import { hapticTick } from '@/lib/haptics';
 import { feedPrefetcher } from '@/lib/media/feedPrefetcher';
 import { isImageUrl } from '@/lib/media/mediaKind';
+import { prefetchLivingHtml } from '@/lib/living/livingHtmlCache';
+import { parseLivingPostRecipe } from '@/lib/living/livingPostValidator';
 import { markSlideActive, recordFirstFrame } from '@/lib/media/ttff';
 import { bufferedAheadSeconds, createVideoPool, disposeVideoPool, isAudible, liveVideo, resumeLiveVideo, unlockPool, unmuteLiveVideo, VideoPoolContext, watchPool } from '@/lib/media/videoPool';
 import type { FeedItem } from '@/types/social';
@@ -35,7 +37,7 @@ import type { FeedItem } from '@/types/social';
 const ACTIVE_RATIO = 0.6;
 /** Background prefetch waits until the playing video has this much buffered ahead. */
 const MIN_BUFFER_AHEAD_S = 3;
-const NON_VIDEO_FORMATS: ReadonlySet<string> = new Set(['image', 'recipe_avatar', 'recipe_shayari']);
+const NON_VIDEO_FORMATS: ReadonlySet<string> = new Set(['image', 'recipe_avatar', 'recipe_shayari', 'living_post']);
 
 /** Mask posts keep audio in `media_url`; 3D scenes and images have no video to warm. */
 const prefetchUrlOf = (item: FeedItem): string | null =>
@@ -86,6 +88,18 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
       return live !== null && bufferedAheadSeconds(live) < MIN_BUFFER_AHEAD_S;
     },
   });
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      for (const offset of [1, 2]) {
+        const next = items[activeIndex + offset];
+        if (next?.post_format === 'living_post') {
+          const parsed = parseLivingPostRecipe(next.recipe_data);
+          if (parsed?.livingHtmlUrl) prefetchLivingHtml(parsed.livingHtmlUrl);
+        }
+      }
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [items, activeIndex]);
   const [maskHost, setMaskHost] = useState<HTMLDivElement | null>(null);
   const maskBar = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);

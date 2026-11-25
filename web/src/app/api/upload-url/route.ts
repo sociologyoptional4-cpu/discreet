@@ -14,6 +14,8 @@ const ALLOWED_TYPES = new Set([
   'image/jpeg',
   'image/png',
   'application/json',
+  'text/plain',
+  'text/html',
 ]);
 const EDGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const MAX_BYTES = 64 * 1024 * 1024;

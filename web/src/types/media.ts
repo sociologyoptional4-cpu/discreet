@@ -1,7 +1,7 @@
 import type { AvatarId } from './avatar';
 
 /** Supported post storage formats in `public.posts.post_format`. */
-export const POST_FORMATS = ['video', 'image', 'recipe_avatar', 'recipe_shayari'] as const;
+export const POST_FORMATS = ['video', 'image', 'recipe_avatar', 'recipe_shayari', 'living_post'] as const;
 export type PostFormat = (typeof POST_FORMATS)[number];
 
 /** Deduplicated media asset stored in `public.media_assets` and hosted on Cloudflare R2. */
@@ -65,8 +65,19 @@ export interface ShayariRecipeData {
   durationSec?: number;
 }
 
+/** Lightweight JSON blueprint for AI-generated Living Posts (`post_format = 'living_post'`). */
+export interface LivingPostRecipeData {
+  kind: 'living_post';
+  version: 1;
+  livingHtmlUrl: string;
+  prompt: string;
+  remixedFromPostId?: string | null;
+  /** Optional inline fallback used only in offline/demo mode. */
+  livingHtml?: string;
+}
+
 /** Discriminated union stored in `public.posts.recipe_data`. */
-export type RecipeData = AvatarRecipeData | ShayariRecipeData;
+export type RecipeData = AvatarRecipeData | ShayariRecipeData | LivingPostRecipeData;
 
 /** Media pipeline columns added to `public.posts`. */
 export interface PostMediaColumns {
