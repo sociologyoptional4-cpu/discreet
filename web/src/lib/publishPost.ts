@@ -1,3 +1,4 @@
+import { extensionForMime } from '@/lib/media/mediaKind';
 import { NonRetryableError } from '@/lib/media/optimisticUpload';
 import { describeMedia, uploadFiles, uploadMedia, type MediaInput } from '@/lib/r2Upload';
 import { demoAddPost } from '@/lib/demoData';
@@ -85,8 +86,6 @@ export type ProcessedPostMeta = { mode: PrivacyMode; durationSec: number; topic:
 const POSTGRES_DUPLICATE_KEY = '23505';
 const POSTGRES_INSUFFICIENT_PRIVILEGE = '42501';
 
-const extensionFor = (type: string, fallback: string): string => (type.includes('webm') ? 'webm' : type.includes('webp') ? 'webp' : type.includes('jpeg') ? 'jpg' : fallback);
-
 /**
  * Publishes an already-processed clip: uploads it and its thumbnail, then inserts the post under the job's own id.
  * Safe to run again after a crash or a retry: a post that already exists counts as published, and a database that
@@ -102,8 +101,8 @@ export async function publishProcessedVideo(
   const expiryTier: ExpiryTier = meta.isIncog ? '1d' : meta.expiryTier;
 
   const videoType = job.video.type || 'video/mp4';
-  const files = [{ blob: job.video, contentType: videoType, fileName: `snap.${extensionFor(videoType, 'mp4')}` }];
-  if (job.thumbnail) files.push({ blob: job.thumbnail, contentType: job.thumbnail.type || 'image/webp', fileName: `thumb.${extensionFor(job.thumbnail.type, 'webp')}` });
+  const files = [{ blob: job.video, contentType: videoType, fileName: `snap.${extensionForMime(videoType)}` }];
+  if (job.thumbnail) files.push({ blob: job.thumbnail, contentType: job.thumbnail.type || 'image/webp', fileName: `thumb.${extensionForMime(job.thumbnail.type || 'image/webp')}` });
   let targets;
   try {
     targets = await uploadFiles(token, files, 'post', expiryTier, (fraction) => onProgress?.(fraction * UPLOAD_SHARE));

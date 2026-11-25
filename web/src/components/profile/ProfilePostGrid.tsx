@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Play } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { isImageUrl } from '@/lib/media/mediaKind';
 import { timeLeftLabel } from '@/lib/profileFormat';
 import type { ProfilePostSummary } from '@/types/social';
 
@@ -56,9 +57,9 @@ export function ProfilePostGrid({ permanent, burners }: { permanent: ProfilePost
               return (
                 <li key={post.id}>
                   <Link href={`/feed?postId=${post.id}`} aria-label={post.caption || 'Open post'} className="relative block aspect-[9/16] overflow-hidden bg-slate-200 focus-visible:outline-2 focus-visible:outline-violet-400">
-                    {post.thumbnail_url ? (
+                    {post.thumbnail_url || isImageUrl(post.media_url) ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={post.thumbnail_url} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" />
+                      <img src={post.thumbnail_url ?? post.media_url} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" />
                     ) : (
                       <span aria-hidden className="absolute inset-0 grid place-items-center bg-gradient-to-br from-violet-200 via-sky-100 to-rose-100"><Play className="size-6 text-slate-500" /></span>
                     )}

@@ -44,7 +44,9 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
         <Suspense fallback={null}>
           <BottomNav />
         </Suspense>
-        <UploadStatusPill />
+        <Suspense fallback={null}>
+          <UploadStatusPill />
+        </Suspense>
       </body>
     </html>
   );
