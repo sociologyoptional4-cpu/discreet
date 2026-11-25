@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { getClientIp, optionalViewer, rateLimit } from '@/lib/server/request';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -53,6 +54,11 @@ function streamSseText(
 
 export async function POST(req: NextRequest) {
   try {
+    const viewerId = await optionalViewer(req);
+    const subject = viewerId ?? `ip:${getClientIp(req)}`;
+    const limited = await rateLimit(subject, 'ai-chat');
+    if (limited) return limited;
+
     const body = await req.json();
     const messages: ChatMessage[] = Array.isArray(body?.messages) ? body.messages : [];
     if (messages.length === 0) {

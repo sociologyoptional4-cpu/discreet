@@ -6,8 +6,8 @@ import { isDemoMode, supabase } from '@/lib/supabase';
 
 export type QueuedBrainSignal = SwipeTelemetry & { postId: string };
 
-const BATCH_SIZE = 5;
-const FLUSH_INTERVAL_MS = 12_000;
+const BATCH_SIZE = 10;
+const FLUSH_INTERVAL_MS = 20_000;
 const queue: QueuedBrainSignal[] = [];
 
 let active = 0;
@@ -77,7 +77,8 @@ export function startBrainSignals(): () => void {
       token = session?.access_token;
     });
     void ensureSession().catch(() => {});
-    const timer = window.setInterval(() => void flushBrainSignals(), FLUSH_INTERVAL_MS);
+    const flushIntervalMs = Math.round(FLUSH_INTERVAL_MS * (0.8 + Math.random() * 0.4));
+    const timer = window.setInterval(() => void flushBrainSignals(), flushIntervalMs);
     const onVisibility = () => {
       if (document.hidden) beaconBrainSignals();
       else void flushBrainSignals();

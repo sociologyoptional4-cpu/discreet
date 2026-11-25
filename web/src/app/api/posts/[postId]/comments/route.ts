@@ -130,7 +130,9 @@ export async function GET(
       ? Math.max(postRow.comments_count, commentRows.length)
       : commentRows.length;
 
-  return json({ comments: topLevel, totalCount });
+  return json({ comments: topLevel, totalCount }, 200, {
+    'Cache-Control': 'public, s-maxage=15, stale-while-revalidate=60',
+  });
 }
 
 export async function POST(

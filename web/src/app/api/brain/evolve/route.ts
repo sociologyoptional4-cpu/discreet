@@ -27,6 +27,12 @@ async function handleEvolution(request: Request): Promise<Response> {
   const force = new URL(request.url).searchParams.get('force') === '1';
   const admin = getSupabaseAdmin();
 
+  try {
+    await admin.rpc('rollup_algo_genome_shards');
+  } catch {
+    // Ignore if sharding migration has not been applied yet
+  }
+
   const { data: rows, error } = await admin
     .from('algo_genomes')
     .select('id, generation, w_vibe, w_pheromone, w_explore, decay_lambda, impressions, cumulative_reward')

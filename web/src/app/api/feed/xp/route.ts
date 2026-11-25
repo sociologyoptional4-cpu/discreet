@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/server/admin';
-import { authenticate } from '@/lib/server/request';
+import { authenticate, rateLimit } from '@/lib/server/request';
 
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as { xp?: unknown; token?: unknown } | null;
@@ -12,6 +12,8 @@ export async function POST(req: NextRequest) {
 
   const auth = await authenticate(effectiveReq);
   if (auth instanceof Response) return auth;
+  const limited = await rateLimit(auth.userId, 'xp');
+  if (limited) return limited;
 
   const xp = typeof body?.xp === 'number' && Number.isFinite(body.xp) ? Math.round(body.xp) : 0;
   if (xp <= 0 || xp > 500) {

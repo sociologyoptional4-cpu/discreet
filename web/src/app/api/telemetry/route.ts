@@ -1,4 +1,4 @@
-import { authenticate, isUuid } from '@/lib/server/request';
+import { authenticate, isUuid, rateLimit } from '@/lib/server/request';
 import { EVENT_NAMES, type PostEvent } from '@/types/feed';
 
 function valid(event: PostEvent) {
@@ -18,6 +18,8 @@ export async function POST(request: Request) {
     ? new Request(request.url, { headers: { Authorization: 'Bearer ' + data.token } }) : request;
   const auth = await authenticate(authenticatedRequest);
   if (auth instanceof Response) return auth;
+  const limited = await rateLimit(auth.userId, 'telemetry');
+  if (limited) return limited;
   const result = await auth.client.rpc('ingest_post_events', { p_events: data.events });
   return new Response(null, { status: result.error ? 503 : 204 });
 }

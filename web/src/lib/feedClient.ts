@@ -14,7 +14,7 @@ export async function nextFeedPage(cursor: string | null, ids: string[], topics:
     },
     body: JSON.stringify({
       cursor,
-      seen_post_ids: ids,
+      seen_post_ids: ids.slice(-500),
       session_downrank_topics: topics.slice(-256),
       previous_id: previous,
       ...(genomeId ? { genome_id: genomeId } : {}),

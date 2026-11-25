@@ -48,7 +48,8 @@ export function startTelemetry() {
       token = session?.access_token;
     });
     void ensureSession().catch(() => {});
-    const timer = window.setInterval(flush, 5000);
+    const flushIntervalMs = Math.round(15_000 * (0.8 + Math.random() * 0.4));
+    const timer = window.setInterval(flush, flushIntervalMs);
     const visibility = () => { if (document.hidden) beacon(); else void flush(); };
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('pagehide', beacon);

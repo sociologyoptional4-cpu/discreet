@@ -2,7 +2,7 @@ import { pickStickyGenome, rankCandidates, type CandidatePost } from '@/lib/brai
 import { diversifyFeed } from '@/lib/feedRanker';
 import { getSupabaseAdmin } from '@/lib/server/admin';
 import { getActiveGenomes } from '@/lib/server/brainGenomes';
-import { authenticate, isUuid } from '@/lib/server/request';
+import { authenticate, isUuid, rateLimit } from '@/lib/server/request';
 import type { PublicPost } from '@/types/social';
 
 interface BrainCandidateRow {
@@ -17,6 +17,8 @@ interface BrainCandidateRow {
 export async function POST(request: Request) {
   const auth = await authenticate(request);
   if (auth instanceof Response) return auth;
+  const limited = await rateLimit(auth.userId, 'feed');
+  if (limited) return limited;
   const body = await request.json().catch(() => null);
   if (!body || !Array.isArray(body.seen_post_ids) || body.seen_post_ids.length > 24000 || !body.seen_post_ids.every(isUuid)
     || !Array.isArray(body.session_downrank_topics) || body.session_downrank_topics.length > 256
@@ -40,10 +42,12 @@ export async function POST(request: Request) {
     (requestedGenomeId ? genomes.find((g) => g.id === requestedGenomeId) : undefined) ??
     pickStickyGenome(genomes, `${auth.userId}:${new Date().toISOString().slice(0, 10)}`);
 
+  const seenIdsForDb = body.seen_post_ids.slice(-500);
+
   const [brainCandidates, previous] = await Promise.all([
     getSupabaseAdmin().rpc('get_brain_feed_candidates', {
       p_user_id: auth.userId,
-      p_seen_ids: body.seen_post_ids,
+      p_seen_ids: seenIdsForDb,
       p_downrank_topics: body.session_downrank_topics.map((t: string) => t.toLowerCase()),
       p_limit: Math.min(60, Math.max(50, limit * 3)),
     }),
@@ -84,7 +88,7 @@ export async function POST(request: Request) {
       p_user_id: auth.userId,
       p_cursor: cursor,
       p_limit: Math.min(100, limit * 4),
-      p_seen_ids: body.seen_post_ids,
+      p_seen_ids: seenIdsForDb,
       p_downrank_topics: body.session_downrank_topics,
     });
     if (fallback.error) return Response.json({ error: 'Could not load feed.' }, { status: 503 });

@@ -62,5 +62,11 @@ export async function GET(request: NextRequest, context: { params: Promise<{ use
     permanentPosts: (permanent.data as unknown as PostRow[]).map(toSummary),
     burnerPosts: (burners.data as unknown as PostRow[]).map(toSummary),
   };
-  return json(body);
+  return json(
+    body,
+    200,
+    viewerId === null
+      ? { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=120', Vary: 'Authorization' }
+      : { Vary: 'Authorization' },
+  );
 }
