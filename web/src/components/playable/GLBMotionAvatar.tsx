@@ -1,9 +1,11 @@
 'use client';
 
 import { useGLTF } from '@react-three/drei';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import * as THREE from 'three';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {
   ARKIT_52_COUNT,
@@ -62,7 +64,14 @@ export function GLBMotionAvatar({
   position = [0, -1.25, 0],
   scale = 1.25,
 }: GLBMotionAvatarProps) {
-  const gltf = useGLTF(glbUrl);
+  const gl = useThree((state) => state.gl);
+  const gltf = useGLTF(glbUrl, true, true, (loader) => {
+    const ktx2 = new KTX2Loader();
+    ktx2.setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/libs/basis/');
+    ktx2.detectSupport(gl);
+    loader.setKTX2Loader(ktx2 as unknown as Parameters<typeof loader.setKTX2Loader>[0]);
+    loader.setMeshoptDecoder(MeshoptDecoder);
+  });
   const scene = useMemo(() => cloneSkeleton(gltf.scene), [gltf.scene]);
 
   const morphBindingsRef = useRef<MorphBinding[]>([]);

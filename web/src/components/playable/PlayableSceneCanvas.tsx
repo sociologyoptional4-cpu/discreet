@@ -2,13 +2,23 @@
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { motion } from 'framer-motion';
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type * as THREE from 'three';
 import { GLBMotionAvatar } from '@/components/playable/GLBMotionAvatar';
 import { decodeMotionTrack, type DecodedMotionTrack } from '@/lib/motion/motionCodec';
 import type { PlayableAvatarConfig, PlayableFontStyle, PlayableScenePreset, PlayableSceneRecipe } from '@/types/playable';
 
 type Props = { recipe: PlayableSceneRecipe; isActive: boolean; isMuted: boolean };
+
+class AvatarErrorBoundary extends Component<{ children: ReactNode; fallback?: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  render() {
+    return this.state.hasError ? (this.props.fallback ?? null) : this.props.children;
+  }
+}
 
 const LOOK_AT_Y = 1.1;
 const PARTICLES = 180;
@@ -236,15 +246,17 @@ export default function PlayableSceneCanvas({ recipe, isActive, isMuted }: Props
         <directionalLight position={[4, 8, 5]} color={lighting.accentColor} intensity={1.4} />
         <SceneEnvironment preset={scenePreset} accentColor={lighting.accentColor} />
         {avatarGlbUrl && motionTrack ? (
-          <Suspense fallback={null}>
-            <GLBMotionAvatar
-              glbUrl={avatarGlbUrl}
-              track={motionTrack}
-              audioRef={audioRef}
-              isActive={isActive}
-              position={avatar?.position ?? [0, -1.25, 0]}
-            />
-          </Suspense>
+          <AvatarErrorBoundary fallback={avatar ? <PlayableAvatar config={avatar} /> : null}>
+            <Suspense fallback={null}>
+              <GLBMotionAvatar
+                glbUrl={avatarGlbUrl}
+                track={motionTrack}
+                audioRef={audioRef}
+                isActive={isActive}
+                position={avatar?.position ?? [0, -1.25, 0]}
+              />
+            </Suspense>
+          </AvatarErrorBoundary>
         ) : (
           avatar && <PlayableAvatar config={avatar} />
         )}
