@@ -23,6 +23,7 @@ import { setImmersive } from '@/lib/immersive';
 import { ensureSession } from '@/lib/session';
 import { handleShare } from '@/lib/share';
 import { playCue, primeAudio } from '@/lib/chat/spatialAudio';
+import { createVideoPool, disposeVideoPool, unlockPool, VideoPoolContext } from '@/lib/media/videoPool';
 import type { FeedItem } from '@/types/social';
 
 const ACTIVE_RATIO = 0.6;
@@ -53,6 +54,9 @@ function followedAhead(items: FeedItem[], from: number): FeedItem | undefined {
 export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   const router = useRouter();
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const [videoPool] = useState(() => (typeof document === 'undefined' ? null : createVideoPool()));
+  useEffect(() => () => { if (videoPool) disposeVideoPool(videoPool); }, [videoPool]);
+  const unlockAudio = () => { primeAudio(); if (videoPool) unlockPool(videoPool); };
   const { items, active, index: activeIndex, select, playback, notInterested } = useFeedEngine(initial, paginate, snapshot);
   const [maskHost, setMaskHost] = useState<HTMLDivElement | null>(null);
   const maskBar = useRef<HTMLElement | null>(null);
@@ -238,7 +242,8 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   };
 
   return (
-    <div onPointerDownCapture={primeAudio} onTouchStartCapture={primeAudio} className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-black text-white">
+    <VideoPoolContext.Provider value={videoPool}>
+    <div onPointerDownCapture={unlockAudio} onTouchStartCapture={unlockAudio} className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-black text-white">
       {maskHost && active?.mode === 'mask' && createPortal(
         <>
           <MaskPlayback avatarId={styleFor(active)} motionUrl={active.motion_url} audioUrl={active.media_url} soundOn={soundOn} paused={pausedId === active.id} barRef={maskBar}
@@ -277,7 +282,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
                 item={item}
                 active={item.id === activeId}
                 near={near}
-                isNext={index === activeIndex + 1}
+                index={index}
                 expanded={item.id === expandedId}
                 paused={pausedId === item.id}
                 soundOn={soundOn}
@@ -286,6 +291,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
                 onCollapse={() => setExpandedId(null)}
                 onTogglePause={() => setPausedId((p) => (p === item.id ? null : item.id))}
                 onToggleSound={() => setSoundOn((on) => !on)}
+                onSoundBlocked={() => setSoundOn(false)}
                 onCounterTake={() => router.push(counterTakeUrl(item.topic_entity))}
                 onNotInterested={() => { notInterested(item); flash('Not interested'); }}
                 onShare={() => void share(item)}
@@ -301,7 +307,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
         </div>
       </LayoutGroup>
       <AuroraEdgeGlow emotion={active?.emotion_tag} pulse={pulse} />
-      <FeedGamificationHUD progress={(xp % LEVEL_XP) / LEVEL_XP} milestone={milestone} />
+      <FeedGamificationHUD milestone={milestone} />
       <AIFeedNudge nudge={nudge} onDismiss={() => setNudge(null)}
         onAction={() => { const target = followedAhead(items, activeIndex); if (target) jumpTo(target.id); else setNudge(null); }} />
       <CommentsDrawer
@@ -319,5 +325,6 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
         </p>
       )}
     </div>
+    </VideoPoolContext.Provider>
   );
 }

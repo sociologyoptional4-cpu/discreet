@@ -1,7 +1,7 @@
 'use client';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Play } from 'lucide-react';
 import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
 import { CommentOrb, FollowButton, ShareOrb, SoundOrb } from '@/components/feed/FeedControls';
@@ -9,6 +9,7 @@ import type { SocialActions } from '@/hooks/useSocialActions';
 import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
 import { playCue } from '@/lib/chat/spatialAudio';
+import { attachVideo, playVideo, POOL_SIZE, setVideoMuted, VideoPoolContext } from '@/lib/media/videoPool';
 import type { FeedItem } from '@/types/social';
 
 export type FeedCardProps = {
@@ -16,7 +17,8 @@ export type FeedCardProps = {
   active: boolean;
   /** Close enough to the screen that a video should be loaded (`Math.abs(index - activeIndex) <= 1`). */
   near: boolean;
-  isNext?: boolean;
+  /** Position in the feed; picks which pooled video element this card uses. */
+  index: number;
   expanded: boolean;
   paused: boolean;
   soundOn: boolean;
@@ -25,6 +27,8 @@ export type FeedCardProps = {
   onCollapse: () => void;
   onTogglePause: () => void;
   onToggleSound: () => void;
+  /** The browser refused to autoplay with sound: the feed flips to muted so the sound control tells the truth. */
+  onSoundBlocked: () => void;
   onShare: () => void;
   onCounterTake: () => void;
   onNotInterested: () => void;
@@ -162,9 +166,10 @@ export function FeedCard(props: FeedCardProps) {
             thumbnailUrl={item.thumbnail_url}
             onFailure={() => setFailedUrl(item.media_url)}
             active={active}
-            isNext={Boolean(props.isNext)}
+            slot={props.index}
             paused={paused}
             soundOn={soundOn}
+            onSoundBlocked={props.onSoundBlocked}
             barRef={barRef}
           />
         ) : item.thumbnail_url ? (
@@ -213,66 +218,79 @@ export function FeedCard(props: FeedCardProps) {
   );
 }
 
-/** Strict 3-slot virtualized video player with zero-flicker poster handoff & decoder cleanup. */
+/** Plays a post through one of the feed's three persistent <video> elements, moved into this card while it is near. */
 function PostVideo({
   src,
   thumbnailUrl,
+  slot,
   active,
-  isNext,
   paused,
   soundOn,
   barRef,
   onFailure,
+  onSoundBlocked,
 }: {
   onFailure: () => void;
+  onSoundBlocked: () => void;
   src: string;
   thumbnailUrl?: string | null;
+  slot: number;
   active: boolean;
-  isNext: boolean;
   paused: boolean;
   soundOn: boolean;
   barRef: RefObject<HTMLElement | null>;
 }): ReactNode {
-  const ref = useRef<HTMLVideoElement>(null);
+  const pool = useContext(VideoPoolContext);
+  const video = pool?.[slot % POOL_SIZE] ?? null;
+  const host = useRef<HTMLDivElement>(null);
   const [readyToShow, setReadyToShow] = useState(false);
 
-  useEffect(() => {
-    const video = ref.current;
-    if (!video) return;
-    video.muted = !soundOn || !active;
-  }, [active, soundOn]);
+  useLayoutEffect(() => {
+    const el = host.current;
+    if (!el || !video) return;
+    return attachVideo(video, el, src, corsSafe(src));
+  }, [video, src]);
 
   useEffect(() => {
-    const video = ref.current;
+    if (!video) return;
+    const onPlaying = () => setReadyToShow(true);
+    const onLoaded = () => { if (video.readyState >= 3) setReadyToShow(true); };
+    const onTime = () => {
+      const bar = barRef.current;
+      const { currentTime, duration } = video;
+      if (bar && Number.isFinite(duration) && duration > 0) bar.style.transform = `scaleX(${Math.min(1, currentTime / duration)})`;
+    };
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('loadeddata', onLoaded);
+    video.addEventListener('timeupdate', onTime);
+    video.addEventListener('error', onFailure);
+    return () => {
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('loadeddata', onLoaded);
+      video.removeEventListener('timeupdate', onTime);
+      video.removeEventListener('error', onFailure);
+    };
+  }, [video, barRef, onFailure]);
+
+  useEffect(() => {
+    if (!video) return;
+    setVideoMuted(video, !soundOn || !active);
+  }, [video, active, soundOn]);
+
+  useEffect(() => {
     if (!video) return;
     if (active && !paused) {
-      video.muted = !soundOn;
-      video.play().catch(() => {
-        video.muted = true;
-        video.play().catch(() => {});
-      });
+      playVideo(video, soundOn, onSoundBlocked);
     } else {
       video.pause();
     }
-  }, [active, paused, soundOn, src]);
-
-  useEffect(() => {
-    const video = ref.current;
-    return () => {
-      if (!video) return;
-      try {
-        video.pause();
-        video.removeAttribute('src');
-        video.src = '';
-        video.load();
-      } catch {
-        // ignore cleanup errors
-      }
-    };
-  }, []);
+    // onSoundBlocked only reports a refused autoplay and must not restart playback
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video, active, paused, soundOn, src]);
 
   return (
     <div className="relative size-full bg-black">
+      <div ref={host} className="absolute inset-0" />
       {thumbnailUrl && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -283,28 +301,6 @@ function PostVideo({
           }`}
         />
       )}
-      <video
-        ref={ref}
-        src={src}
-        onError={onFailure}
-        onPlaying={() => setReadyToShow(true)}
-        onLoadedData={(e) => {
-          if (e.currentTarget.readyState >= 3) setReadyToShow(true);
-        }}
-        playsInline
-        loop
-        autoPlay={active}
-        muted={!soundOn || !active}
-        preload={active || isNext ? 'auto' : 'metadata'}
-        crossOrigin={corsSafe(src) ? 'anonymous' : undefined}
-        className="relative size-full object-cover"
-        onTimeUpdate={(e) => {
-          const bar = barRef.current;
-          const { currentTime, duration } = e.currentTarget;
-          if (bar && Number.isFinite(duration) && duration > 0) bar.style.transform = `scaleX(${Math.min(1, currentTime / duration)})`;
-        }}
-      />
     </div>
   );
 }
-
