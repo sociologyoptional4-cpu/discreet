@@ -25,6 +25,15 @@ CREATE TABLE IF NOT EXISTS public.user_taste_vectors (
 );
 ALTER TABLE public.user_taste_vectors ENABLE ROW LEVEL SECURITY;
 
+-- Anti-spam dedup: max 1 brain signal per (user_id, post_id)
+CREATE TABLE IF NOT EXISTS public.brain_signal_dedup (
+  user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  post_id uuid NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, post_id)
+);
+ALTER TABLE public.brain_signal_dedup ENABLE ROW LEVEL SECURITY;
+
 -- Fix #2A: Unique genome_key prevents duplicate seed rows on re-run.
 CREATE TABLE IF NOT EXISTS public.algo_genomes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -66,8 +75,8 @@ DECLARE
   v_batch_count integer := 0;
   v_total_reward double precision := 0.0;
 BEGIN
-  WITH raw_rows AS (
-    SELECT
+  WITH input_rows AS (
+    SELECT DISTINCT ON (x.post_id)
       x.post_id,
       coalesce(x.alpha_delta, 0.0) AS alpha_delta,
       coalesce(x.beta_delta, 0.0) AS beta_delta,
@@ -81,6 +90,19 @@ BEGIN
       reward double precision
     )
     WHERE x.post_id IS NOT NULL
+  ),
+  dedup_accepted AS (
+    INSERT INTO public.brain_signal_dedup (user_id, post_id)
+    SELECT p_user_id, r.post_id
+    FROM input_rows r
+    JOIN public.posts p ON p.id = r.post_id
+    ON CONFLICT (user_id, post_id) DO NOTHING
+    RETURNING post_id
+  ),
+  raw_rows AS (
+    SELECT r.*
+    FROM input_rows r
+    JOIN dedup_accepted d ON d.post_id = r.post_id
   ),
   agg AS (
     SELECT

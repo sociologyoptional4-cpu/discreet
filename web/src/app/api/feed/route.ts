@@ -67,6 +67,7 @@ export async function POST(request: Request) {
       postById.set(row.post.id, row.post);
       candidates.push({
         id: row.post.id,
+        creatorId: row.post.user_id,
         vibeSimilarity: Number(row.vibe_similarity ?? 0.5),
         pheromoneRaw: Number(row.pheromone_raw ?? 1),
         ageHours: Number(row.age_hours ?? 0),

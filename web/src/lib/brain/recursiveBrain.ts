@@ -17,6 +17,7 @@ export interface AlgoGenome {
 
 export interface CandidatePost {
   id: string;
+  creatorId?: string | null;
   vibeSimilarity: number; // 0..1 from pgvector cosine similarity
   pheromoneRaw: number;   // weighted engagement sum
   ageHours: number;
@@ -120,14 +121,15 @@ export function sampleBeta(
 }
 
 /**
- * Scores and ranks top candidates using the assigned `AlgoGenome`.
+ * Scores and ranks top candidates using the assigned `AlgoGenome`,
+ * applying a Creator Spacing Guard so the same creator never appears back-to-back within 3 slides.
  */
 export function rankCandidates(
   candidates: readonly CandidatePost[],
   genome: AlgoGenome,
   rng: () => number = Math.random
 ): Array<{ id: string; score: number }> {
-  return candidates
+  const scored = candidates
     .map((post) => {
       const vibe = Math.min(1, Math.max(0, post.vibeSimilarity));
       const pheromone = computeDecayedPheromone(
@@ -142,9 +144,28 @@ export function rankCandidates(
         genome.wPheromone * pheromone +
         genome.wExplore * explore;
 
-      return { id: post.id, score };
+      return { id: post.id, creatorId: post.creatorId ?? null, score };
     })
     .sort((a, b) => b.score - a.score);
+
+  const pool = [...scored];
+  const spaced: Array<{ id: string; score: number }> = [];
+  const recentCreators: string[] = [];
+
+  while (pool.length > 0) {
+    let pickIdx = pool.findIndex(
+      (item) => !item.creatorId || !recentCreators.includes(item.creatorId)
+    );
+    if (pickIdx < 0) pickIdx = 0;
+    const [chosen] = pool.splice(pickIdx, 1);
+    spaced.push({ id: chosen.id, score: chosen.score });
+    if (chosen.creatorId) {
+      recentCreators.push(chosen.creatorId);
+      if (recentCreators.length > 3) recentCreators.shift();
+    }
+  }
+
+  return spaced;
 }
 
 /**

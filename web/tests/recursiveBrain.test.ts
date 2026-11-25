@@ -151,3 +151,24 @@ test('evolveGenomes keeps top performers, applies 0.5x survivor decay (Fix #5), 
   assert.equal(ranked[0].id, 'high');
   assert.equal(pickStickyGenome(genomes, 'user-1:2026-11-25').id, pickStickyGenome(genomes, 'user-1:2026-11-25').id);
 });
+
+test('rankCandidates Creator Spacing Guard prevents back-to-back clips from the same creator', () => {
+  const genome: AlgoGenome = {
+    id: 'g1', generation: 1, wVibe: 1, wPheromone: 0, wExplore: 0, decayLambda: 1.3, impressions: 0, cumulativeReward: 0,
+  };
+  const spaced = rankCandidates(
+    [
+      { id: 'c1-a', creatorId: 'creator-1', vibeSimilarity: 0.99, pheromoneRaw: 1, ageHours: 1, alpha: 2, beta: 2 },
+      { id: 'c1-b', creatorId: 'creator-1', vibeSimilarity: 0.98, pheromoneRaw: 1, ageHours: 1, alpha: 2, beta: 2 },
+      { id: 'c1-c', creatorId: 'creator-1', vibeSimilarity: 0.97, pheromoneRaw: 1, ageHours: 1, alpha: 2, beta: 2 },
+      { id: 'c2-a', creatorId: 'creator-2', vibeSimilarity: 0.70, pheromoneRaw: 1, ageHours: 1, alpha: 2, beta: 2 },
+      { id: 'c3-a', creatorId: 'creator-3', vibeSimilarity: 0.65, pheromoneRaw: 1, ageHours: 1, alpha: 2, beta: 2 },
+    ],
+    genome,
+    mulberry32(1),
+  );
+  assert.deepEqual(
+    spaced.slice(0, 3).map((s) => s.id),
+    ['c1-a', 'c2-a', 'c3-a'],
+  );
+});
