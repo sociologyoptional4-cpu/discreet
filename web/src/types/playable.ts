@@ -36,6 +36,8 @@ export interface PlayableSceneRecipe {
   lighting: PlayableLighting;
   camera: PlayableCamera;
   avatar?: PlayableAvatarConfig;
+  avatarGlbUrl?: string | null;
+  motionTrackUrl?: string | null;
   textOverlay?: PlayableTextOverlay;
   audioUrl: string | null;
   remixedFromPostId: string | null;
@@ -117,6 +119,8 @@ export function parsePlayableRecipe(raw: unknown): PlayableSceneRecipe | null {
       ? { lines, fontStyle: oneOf(FONTS, textRaw.fontStyle) ?? 'serif', color: color(textRaw.color, '#ffffff'), glow: Boolean(textRaw.glow) }
       : undefined,
     audioUrl: typeof r.audioUrl === 'string' && isTrustedAudioUrl(r.audioUrl) ? r.audioUrl : null,
+    avatarGlbUrl: typeof r.avatarGlbUrl === 'string' && isTrustedAudioUrl(r.avatarGlbUrl) ? r.avatarGlbUrl : null,
+    motionTrackUrl: typeof r.motionTrackUrl === 'string' && isTrustedAudioUrl(r.motionTrackUrl) ? r.motionTrackUrl : null,
     remixedFromPostId: typeof r.remixedFromPostId === 'string' && UUID.test(r.remixedFromPostId) ? r.remixedFromPostId : null,
   };
 }

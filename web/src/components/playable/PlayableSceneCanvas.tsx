@@ -2,8 +2,10 @@
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { motion } from 'framer-motion';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type * as THREE from 'three';
+import { GLBMotionAvatar } from '@/components/playable/GLBMotionAvatar';
+import { decodeMotionTrack, type DecodedMotionTrack } from '@/lib/motion/motionCodec';
 import type { PlayableAvatarConfig, PlayableFontStyle, PlayableScenePreset, PlayableSceneRecipe } from '@/types/playable';
 
 type Props = { recipe: PlayableSceneRecipe; isActive: boolean; isMuted: boolean };
@@ -188,8 +190,25 @@ const FONT_CLASS: Record<PlayableFontStyle, string> = { serif: 'font-serif', san
  */
 export default function PlayableSceneCanvas({ recipe, isActive, isMuted }: Props) {
   const [exploring, setExploring] = useState(false);
+  const [motionTrack, setMotionTrack] = useState<DecodedMotionTrack | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const { camera, lighting, avatar, textOverlay, scenePreset, audioUrl } = recipe;
+  const { camera, lighting, avatar, avatarGlbUrl, motionTrackUrl, textOverlay, scenePreset, audioUrl } = recipe;
+
+  useEffect(() => {
+    if (!motionTrackUrl) return;
+    const ctrl = new AbortController();
+    fetch(motionTrackUrl, { signal: ctrl.signal })
+      .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error('Failed to load .vmt track'))))
+      .then((buf) => decodeMotionTrack(new Uint8Array(buf)))
+      .then((decoded) => {
+        if (!ctrl.signal.aborted) setMotionTrack(decoded);
+      })
+      .catch(() => {});
+    return () => {
+      ctrl.abort();
+      setMotionTrack(null);
+    };
+  }, [motionTrackUrl]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -216,7 +235,19 @@ export default function PlayableSceneCanvas({ recipe, isActive, isMuted }: Props
         <ambientLight color={lighting.ambientColor} intensity={lighting.intensity} />
         <directionalLight position={[4, 8, 5]} color={lighting.accentColor} intensity={1.4} />
         <SceneEnvironment preset={scenePreset} accentColor={lighting.accentColor} />
-        {avatar && <PlayableAvatar config={avatar} />}
+        {avatarGlbUrl && motionTrack ? (
+          <Suspense fallback={null}>
+            <GLBMotionAvatar
+              glbUrl={avatarGlbUrl}
+              track={motionTrack}
+              audioRef={audioRef}
+              isActive={isActive}
+              position={avatar?.position ?? [0, -1.25, 0]}
+            />
+          </Suspense>
+        ) : (
+          avatar && <PlayableAvatar config={avatar} />
+        )}
         {exploring
           ? <OrbitControls enableZoom={false} enablePan={false} target={[0, LOOK_AT_Y, 0]} minPolarAngle={Math.PI / 4} maxPolarAngle={Math.PI / 2.05} />
           : <AutoOrbit speed={camera.autoOrbitSpeed} />}
