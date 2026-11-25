@@ -121,7 +121,13 @@ export function FeedCard(props: FeedCardProps) {
       style={{ borderRadius: 0 }}
       className="absolute inset-0 overflow-hidden bg-black text-white"
       {...longPress}
-      onClick={() => { if (!soundOn) onToggleSound(); onTogglePause(); }}
+      onClick={() => {
+        if (!soundOn) {
+          onToggleSound();
+          return;
+        }
+        onTogglePause();
+      }}
       onDoubleClick={doubleTapLike}
       onKeyDown={open}
       role="article"
@@ -201,6 +207,11 @@ export function FeedCard(props: FeedCardProps) {
 /** Plays only while active; neighbouring cards keep a paused, preloaded video so a swipe starts instantly. */
 function PostVideo({ src, active, paused, soundOn, barRef, onFailure }: { onFailure: () => void; src: string; active: boolean; paused: boolean; soundOn: boolean; barRef: RefObject<HTMLElement | null> }): ReactNode {
   const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    video.muted = !soundOn || !active;
+  }, [active, soundOn]);
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
