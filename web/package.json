@@ -19,6 +19,7 @@
     "@snap/camera-kit": "^1.23.1",
     "@supabase/supabase-js": "^2.119.2",
     "@types/three": "^0.187.0",
+    "@webav/av-cliper": "^1.2.8",
     "fflate": "^0.8.3",
     "framer-motion": "^14.14.0",
     "lucide-react": "^1.79.0",
