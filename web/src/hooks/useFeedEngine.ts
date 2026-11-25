@@ -14,6 +14,7 @@ import {
 import { isDemoMode, supabase } from '@/lib/supabase';
 import { queueBrainSwipe, startBrainSignals } from '@/lib/brain/brainClient';
 import { computeSwipeReward } from '@/lib/brain/recursiveBrain';
+import { deepEngine } from '@/lib/deepEngine/deepEngineClient';
 import { recordLocalSwipe } from '@/lib/localBrain/localBrainClient';
 import { startTelemetry, trackPost } from '@/lib/telemetry';
 import type { FeedItem, PublicPost } from '@/types/social';
@@ -117,7 +118,12 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
       fastSkip,
     };
     queueBrainSwipe(swipeSignal);
-    void recordLocalSwipe(state.item.id, computeSwipeReward(swipeSignal));
+    const microReward = deepEngine.onSlideFinished({
+      tag: state.item.topic_entity,
+      watchMs: effectiveWatchMs,
+      durationMs: effectiveDurationMs,
+    });
+    void recordLocalSwipe(state.item.id, (computeSwipeReward(swipeSignal) + microReward) * 0.5);
 
     const itemMeta = state.item as FeedItem & { category?: string | null; key_points?: string[] | null };
     const updatedCtx = recordWatchedPost({
@@ -164,6 +170,7 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
       paused.current = !media || media.paused || media.readyState < 3;
       tick(!document.hidden, !paused.current);
       trackPost(active.id, 'impression');
+      deepEngine.onSlideSettled(active.id, active.topic_entity, active.creator_username, 'SWIPE_NEXT');
     });
     const visibility = () => tick(!document.hidden, !paused.current);
     document.addEventListener('visibilitychange', visibility);
@@ -172,6 +179,7 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
 
   useEffect(startTelemetry, []);
   useEffect(startBrainSignals, []);
+  useEffect(() => deepEngine.init(), []);
 
   const select = useCallback((id: string) => {
     if (clock.current && clock.current.item.id !== id) finish(id);

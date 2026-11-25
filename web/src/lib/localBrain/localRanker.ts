@@ -8,6 +8,12 @@ export interface PoolPostItem {
   alpha: number;
   beta: number;
   vibeInt8?: number[]; // 64-element Int8 array from edge JSON
+  tag?: string | null;
+}
+
+export interface RankPoolOptions {
+  seenFilter?: { has: (id: string) => boolean };
+  hebbianBoostOf?: (tag: string) => number;
 }
 
 export interface LocalGenomeWeights {
@@ -35,9 +41,10 @@ export function rankPoolLocally<T extends PoolPostItem>(
   userTaste: Float32Array | null,
   seenIds: ReadonlySet<string>,
   weights: LocalGenomeWeights = DEFAULT_LOCAL_WEIGHTS,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  options?: RankPoolOptions
 ): T[] {
-  const unseen = pool.filter((p) => !seenIds.has(p.id));
+  const unseen = pool.filter((p) => !seenIds.has(p.id) && !options?.seenFilter?.has(p.id));
   const candidates = unseen.length > 0 ? unseen : [...pool];
 
   const scored = candidates
@@ -56,11 +63,13 @@ export function rankPoolLocally<T extends PoolPostItem>(
       const mean = post.alpha / Math.max(1, post.alpha + post.beta);
       const uncertainty = 1 / Math.sqrt(Math.max(1, post.alpha + post.beta));
       const explore = Math.min(1, Math.max(0, mean + (rng() - 0.5) * uncertainty));
+      const hebbianBoost = post.tag && options?.hebbianBoostOf ? options.hebbianBoostOf(post.tag) * 0.12 : 0;
 
       const score =
         weights.wVibe * vibe +
         weights.wPheromone * pheromone +
-        weights.wExplore * explore;
+        weights.wExplore * explore +
+        hebbianBoost;
 
       return { post, score };
     })

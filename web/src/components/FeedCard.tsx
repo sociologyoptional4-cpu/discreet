@@ -10,6 +10,8 @@ import type { SocialActions } from '@/hooks/useSocialActions';
 import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
 import { playCue } from '@/lib/chat/spatialAudio';
+import { deepEngine } from '@/lib/deepEngine/deepEngineClient';
+import { triggerMicroHaptic } from '@/lib/deepEngine/microHaptics';
 import { useVideoUpscaler } from '@/hooks/useVideoUpscaler';
 import { isCorsSafeMediaUrl } from '@/lib/media/corsSafe';
 import { isImageUrl } from '@/lib/media/mediaKind';
@@ -67,6 +69,43 @@ export function FeedCard(props: FeedCardProps) {
   const longPress = useNegativeFeedback(props.onNotInterested);
   const reduceMotion = useReducedMotion();
   const barRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const touchTrackRef = useRef<{ lastY: number; lastT: number; startT: number }>({ lastY: 0, lastT: 0, startT: 0 });
+
+  // Passive 120Hz touch velocity tracker (zero React state updates during scroll)
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || !active) return;
+    const onStart = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      const now = performance.now();
+      touchTrackRef.current = { lastY: y, lastT: now, startT: now };
+    };
+    const onMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      const now = performance.now();
+      const dt = now - touchTrackRef.current.lastT;
+      if (dt > 4) {
+        const vel = Math.abs(y - touchTrackRef.current.lastY) / dt;
+        deepEngine.setTouchMetrics({ exitVelocityPxMs: vel });
+        touchTrackRef.current.lastY = y;
+        touchTrackRef.current.lastT = now;
+      }
+    };
+    const onEnd = () => {
+      if (performance.now() - touchTrackRef.current.startT > 350) {
+        deepEngine.setTouchMetrics({ heldScreen: true });
+      }
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: true });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+    };
+  }, [active]);
   const recipe = useMemo(
     () => (item.post_format === 'recipe_avatar' || item.post_format === 'recipe_shayari' ? parsePlayableRecipe(item.recipe_data) : null),
     [item.post_format, item.recipe_data],
@@ -115,13 +154,7 @@ export function FeedCard(props: FeedCardProps) {
     if (!like.liked) {
       react(HEART, event.clientX, event.clientY);
     } else {
-      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-        try {
-          navigator.vibrate([16, 26, 20]);
-        } catch {
-          // ignore
-        }
-      }
+      triggerMicroHaptic('like_pop');
       playCue('heart_burst', 0);
       onReact(HEART, event.clientX, event.clientY);
     }
@@ -136,6 +169,7 @@ export function FeedCard(props: FeedCardProps) {
 
   return (
     <motion.div
+      ref={cardRef}
       layout
       transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 32 }}
       style={{ borderRadius: 0 }}
@@ -233,7 +267,7 @@ export function FeedCard(props: FeedCardProps) {
           <div className="flex items-center gap-2">
             {item.is_incog || !item.creator_username
               ? <span className="truncate text-[15px] font-bold drop-shadow">{name}</span>
-              : <Link href={`/profile/${item.creator_username}`} className="truncate text-[15px] font-bold drop-shadow hover:underline">{name}</Link>}
+              : <Link href={`/profile/${item.creator_username}`} onClick={() => deepEngine.markov.record('OPEN_PROFILE')} className="truncate text-[15px] font-bold drop-shadow hover:underline">{name}</Link>}
             {follow && !isOwn && creatorId && creatorHandle && (
               <FollowButton following={follow.following} onToggle={() => void social.toggleFollow({ id: creatorId, username: creatorHandle }, follow.following, item.id)} />
             )}
@@ -248,7 +282,7 @@ export function FeedCard(props: FeedCardProps) {
             <SoundOrb soundOn={props.soundShown} playing={active && !paused} onToggle={onToggleSound} />
             <ShareOrb onShare={onShare} />
             {props.onOpenComments && (
-              <CommentOrb count={props.commentsCount ?? item.comments_count ?? 0} onOpen={props.onOpenComments} />
+              <CommentOrb count={props.commentsCount ?? item.comments_count ?? 0} onOpen={() => { deepEngine.markov.record('OPEN_COMMENTS'); props.onOpenComments?.(); }} />
             )}
           </div>
         </div>

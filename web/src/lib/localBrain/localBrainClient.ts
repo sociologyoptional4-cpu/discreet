@@ -1,5 +1,6 @@
 'use client';
 
+import { deepEngine } from '@/lib/deepEngine/deepEngineClient';
 import {
   appendLocalSeenId,
   loadLocalBrainState,
@@ -127,9 +128,12 @@ export async function rankFeedViaLocalPool(limit = 30): Promise<PublicPost[] | n
   const entries = Array.isArray(data?.pool) ? data.pool : [];
   if (entries.length === 0) return null;
 
+  const preFiltered = entries.filter((entry) => !deepEngine.bloom.has(entry.id));
+  const activeEntries = preFiltered.length > 0 ? preFiltered : entries;
+
   const byId = new Map<string, PublicPost>();
   const lightPool: PoolPostItem[] = [];
-  for (const entry of entries) {
+  for (const entry of activeEntries) {
     if (!entry?.post?.id) continue;
     byId.set(entry.post.id, entry.post);
     if (Array.isArray(entry.vibeInt8) && entry.vibeInt8.length > 0) {
@@ -143,10 +147,23 @@ export async function rankFeedViaLocalPool(limit = 30): Promise<PublicPost[] | n
       alpha: entry.alpha,
       beta: entry.beta,
       vibeInt8: entry.vibeInt8,
+      tag: entry.post.topic_entity ?? null,
     });
   }
 
-  const orderedIds = await rankInWorker(lightPool, state.tasteVector, state.seenIds, state.weights);
+  let orderedIds = await rankInWorker(lightPool, state.tasteVector, state.seenIds, state.weights);
+  // Apply Hebbian cross-tag affinity boost when active tag has wired neighbors
+  const tagMap = new Map(lightPool.map((p) => [p.id, p.tag]));
+  if (orderedIds.some((id) => deepEngine.getHebbianBoost(tagMap.get(id)) > 0)) {
+    const n = orderedIds.length;
+    orderedIds = [...orderedIds].sort((a, b) => {
+      const idxA = orderedIds.indexOf(a);
+      const idxB = orderedIds.indexOf(b);
+      const scoreA = (n - idxA) / n + deepEngine.getHebbianBoost(tagMap.get(a)) * 0.25;
+      const scoreB = (n - idxB) / n + deepEngine.getHebbianBoost(tagMap.get(b)) * 0.25;
+      return scoreB - scoreA;
+    });
+  }
   const posts = orderedIds
     .map((id) => byId.get(id))
     .filter((p): p is PublicPost => Boolean(p))
