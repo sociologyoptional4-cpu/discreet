@@ -1,0 +1,34 @@
+{
+  "midnight_rooftop": {
+    "version": 1,
+    "scenePreset": "midnight_rooftop",
+    "lighting": { "ambientColor": "#1e1b4b", "accentColor": "#818cf8", "intensity": 1.3, "fogDensity": 0.035 },
+    "camera": { "fov": 48, "initialPos": [0, 1.8, 5.5], "autoOrbitSpeed": 0.35 },
+    "avatar": { "modelId": "default_capsule", "position": [0, 0, 0], "animation": "idle", "primaryColor": "#a78bfa" },
+    "textOverlay": { "lines": ["Raat ke 2 baje,", "chhat par sirf khamoshi aur chaand."], "fontStyle": "serif", "color": "#f8fafc", "glow": true }
+  },
+  "neon_rain": {
+    "version": 1,
+    "scenePreset": "neon_rain",
+    "lighting": { "ambientColor": "#0f172a", "accentColor": "#22d3ee", "intensity": 1.5, "fogDensity": 0.05 },
+    "camera": { "fov": 50, "initialPos": [1.5, 1.6, 5.2], "autoOrbitSpeed": 0.5 },
+    "avatar": { "modelId": "default_capsule", "position": [0, 0, 0], "animation": "dance", "primaryColor": "#22d3ee" },
+    "textOverlay": { "lines": ["Sheher bheega hai,", "par vibe abhi bhi electric hai."], "fontStyle": "mono", "color": "#cffafe", "glow": true }
+  },
+  "pastel_clouds": {
+    "version": 1,
+    "scenePreset": "pastel_clouds",
+    "lighting": { "ambientColor": "#fce7f3", "accentColor": "#f472b6", "intensity": 1.4, "fogDensity": 0.025 },
+    "camera": { "fov": 46, "initialPos": [0, 1.5, 5.8], "autoOrbitSpeed": 0.25 },
+    "avatar": { "modelId": "default_capsule", "position": [0, 0.2, 0], "animation": "wave", "primaryColor": "#fb7185" },
+    "textOverlay": { "lines": ["Thoda ruk jao,", "aaj aasmaan kuch zyada hi soft hai."], "fontStyle": "sans", "color": "#ffffff", "glow": false }
+  },
+  "cozy_campfire": {
+    "version": 1,
+    "scenePreset": "cozy_campfire",
+    "lighting": { "ambientColor": "#1c1917", "accentColor": "#fb923c", "intensity": 1.6, "fogDensity": 0.045 },
+    "camera": { "fov": 48, "initialPos": [0, 1.7, 5.4], "autoOrbitSpeed": 0.3 },
+    "avatar": { "modelId": "default_capsule", "position": [-0.9, 0, -0.4], "animation": "sit", "primaryColor": "#fdba74" },
+    "textOverlay": { "lines": ["Sard hawa, halki aag,", "aur kuch unkahi baatein."], "fontStyle": "serif", "color": "#ffedd5", "glow": true }
+  }
+}

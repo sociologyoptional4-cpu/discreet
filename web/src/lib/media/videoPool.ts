@@ -85,3 +85,19 @@ export function watchSilence(video: HTMLVideoElement, onSilent: () => void): () 
     video.removeEventListener('volumechange', check);
   };
 }
+
+/** The pooled element that is currently the playing, on-screen post. */
+export function liveVideo(pool: readonly HTMLVideoElement[]): HTMLVideoElement | null {
+  return pool.find((video) => video.dataset.live === '1') ?? null;
+}
+
+/** Seconds of video already buffered ahead of the playhead; Infinity once the whole file is buffered. */
+export function bufferedAheadSeconds(video: HTMLVideoElement): number {
+  const t = video.currentTime;
+  for (let i = 0; i < video.buffered.length; i++) {
+    const start = video.buffered.start(i);
+    const end = video.buffered.end(i);
+    if (start <= t + 0.1 && t <= end) return Number.isFinite(video.duration) && end >= video.duration - 0.1 ? Infinity : end - t;
+  }
+  return 0;
+}

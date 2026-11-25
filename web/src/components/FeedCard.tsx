@@ -1,7 +1,8 @@
 'use client';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
-import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import dynamic from 'next/dynamic';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Play } from 'lucide-react';
 import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
 import { CommentOrb, FollowButton, ShareOrb, SoundOrb } from '@/components/feed/FeedControls';
@@ -9,8 +10,14 @@ import type { SocialActions } from '@/hooks/useSocialActions';
 import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
 import { playCue } from '@/lib/chat/spatialAudio';
+import { isCorsSafeMediaUrl } from '@/lib/media/corsSafe';
+import { isImageUrl } from '@/lib/media/mediaKind';
 import { attachVideo, markLive, playVideo, POOL_SIZE, setVideoMuted, VideoPoolContext, watchSilence } from '@/lib/media/videoPool';
+import { parsePlayableRecipe } from '@/types/playable';
 import type { FeedItem } from '@/types/social';
+
+/** The 3D engine loads only when an active slide actually is a playable scene. */
+const PlayableSceneCanvas = dynamic(() => import('@/components/playable/PlayableSceneCanvas'), { ssr: false });
 
 export type FeedCardProps = {
   item: FeedItem;
@@ -41,17 +48,6 @@ export type FeedCardProps = {
 };
 
 const HEART = '❤️';
-/** Only R2 serves videos with CORS headers; asking any other host for CORS would stop the video loading. */
-const R2_HOST = /\.r2\.dev$/;
-const corsSafe = (src: string): boolean => {
-  try {
-    const host = new URL(src).hostname;
-    const base = process.env.NEXT_PUBLIC_R2_PUBLIC_URL;
-    return R2_HOST.test(host) || (!!base && host === new URL(base).hostname);
-  } catch {
-    return false;
-  }
-};
 const stop = (event: MouseEvent): void => event.stopPropagation();
 
 /**
@@ -62,8 +58,16 @@ export function FeedCard(props: FeedCardProps) {
   const longPress = useNegativeFeedback(props.onNotInterested);
   const reduceMotion = useReducedMotion();
   const barRef = useRef<HTMLDivElement>(null);
+  const recipe = useMemo(
+    () => (item.post_format === 'recipe_avatar' || item.post_format === 'recipe_shayari' ? parsePlayableRecipe(item.recipe_data) : null),
+    [item.post_format, item.recipe_data],
+  );
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const missingMedia = !item.media_url || failedUrl === item.media_url;
+  const [stillFailedUrl, setStillFailedUrl] = useState<string | null>(null);
+  // Photo posts are still images. A video that fails to load is tried as an image once (older photo posts were saved
+  // under a video file name), and only then reported as unavailable.
+  const asStill = isImageUrl(item.media_url) || failedUrl === item.media_url;
+  const missingMedia = !item.media_url || (asStill && stillFailedUrl === item.media_url);
   const fallback = item.transcript || item.ai_summary || 'Media unavailable';
   const [tapHeart, setTapHeart] = useState<{ id: number; x: number; y: number } | null>(null);
   const toastSeq = useRef(0);
@@ -157,10 +161,22 @@ export function FeedCard(props: FeedCardProps) {
         )}
       </AnimatePresence>
       <div data-mask-slot className="absolute inset-0">
-        {item.mode === 'mask' ? (
+        {recipe ? (
+          active ? (
+            <PlayableSceneCanvas recipe={recipe} isActive={active} isMuted={!soundOn} />
+          ) : item.thumbnail_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={item.thumbnail_url} alt="" className="size-full object-cover" loading="lazy" />
+          ) : (
+            <div aria-hidden className="size-full bg-gradient-to-b from-slate-900 via-indigo-950 to-slate-900" />
+          )
+        ) : item.mode === 'mask' ? (
           active ? null : (
             <div className="size-full" style={{ background: STUDIO_BACKDROP[item.avatar_id ?? 'cyber_monk'] }} />
           )
+        ) : near && !missingMedia && asStill ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.media_url} alt={item.ai_summary ?? ''} className="size-full object-cover" onError={() => setStillFailedUrl(item.media_url)} decoding="async" />
         ) : near && !missingMedia ? (
           <PostVideo
             src={item.media_url}
@@ -249,7 +265,7 @@ function PostVideo({
   useLayoutEffect(() => {
     const el = host.current;
     if (!el || !video) return;
-    return attachVideo(video, el, src, corsSafe(src));
+    return attachVideo(video, el, src, isCorsSafeMediaUrl(src));
   }, [video, src]);
 
   useEffect(() => {

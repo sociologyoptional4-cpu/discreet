@@ -14,6 +14,9 @@ export type PublicPost = {
   avatar_id: AvatarId | null;
   media_url: string;
   thumbnail_url?: string | null;
+  /** Present once supabase/playable_scenes_module1.sql has been run; absent means a plain video post. */
+  post_format?: 'video' | 'image' | 'recipe_avatar' | 'recipe_shayari';
+  recipe_data?: unknown;
   motion_url: string | null;
   duration_sec: number;
   is_incog: boolean;

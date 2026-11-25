@@ -18,6 +18,7 @@ import { LiquidGlassNav } from '@/components/feed/LiquidGlassNav';
 import { FALLBACK_RGB, useVideoAmbientColor } from '@/hooks/useVideoAmbientColor';
 import { AVATAR_META } from '@/lib/avatars';
 import { useFeedEngine } from '@/hooks/useFeedEngine';
+import { useFeedPrefetch } from '@/hooks/useFeedPrefetch';
 import { trackPost } from '@/lib/telemetry';
 import { counterTakeUrl } from '@/lib/feedClient';
 import { useSocialActions } from '@/hooks/useSocialActions';
@@ -25,10 +26,20 @@ import { setImmersive } from '@/lib/immersive';
 import { handleShare } from '@/lib/share';
 import { primeAudio } from '@/lib/chat/spatialAudio';
 import { hapticTick } from '@/lib/haptics';
-import { createVideoPool, disposeVideoPool, unlockPool, VideoPoolContext } from '@/lib/media/videoPool';
+import { feedPrefetcher } from '@/lib/media/feedPrefetcher';
+import { isImageUrl } from '@/lib/media/mediaKind';
+import { markSlideActive, recordFirstFrame } from '@/lib/media/ttff';
+import { bufferedAheadSeconds, createVideoPool, disposeVideoPool, liveVideo, unlockPool, VideoPoolContext } from '@/lib/media/videoPool';
 import type { FeedItem } from '@/types/social';
 
 const ACTIVE_RATIO = 0.6;
+/** Background prefetch waits until the playing video has this much buffered ahead. */
+const MIN_BUFFER_AHEAD_S = 3;
+const NON_VIDEO_FORMATS: ReadonlySet<string> = new Set(['image', 'recipe_avatar', 'recipe_shayari']);
+
+/** Mask posts keep audio in `media_url`; 3D scenes and images have no video to warm. */
+const prefetchUrlOf = (item: FeedItem): string | null =>
+  item.mode === 'mask' || (item.post_format && NON_VIDEO_FORMATS.has(item.post_format)) || isImageUrl(item.media_url) ? null : item.media_url || null;
 const PEEK_PX = 0;
 const GAP_PX = 0;
 
@@ -67,6 +78,15 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   useEffect(() => () => { if (videoPool) disposeVideoPool(videoPool); }, [videoPool]);
   const unlockAudio = () => { primeAudio(); if (videoPool) unlockPool(videoPool); };
   const { items, active, index: activeIndex, select, playback, notInterested } = useFeedEngine(initial, paginate, snapshot);
+  useFeedPrefetch({
+    items,
+    activeIndex,
+    urlOf: prefetchUrlOf,
+    pauseGate: () => {
+      const live = videoPool ? liveVideo(videoPool) : null;
+      return live !== null && bufferedAheadSeconds(live) < MIN_BUFFER_AHEAD_S;
+    },
+  });
   const [maskHost, setMaskHost] = useState<HTMLDivElement | null>(null);
   const maskBar = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -123,6 +143,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   };
 
   const activeId = active?.id;
+  useEffect(() => { if (activeId) markSlideActive(activeId); }, [activeId]);
   const expanded = expandedId !== null;
   const commentsOpen = commentsPostId !== null;
 
@@ -261,7 +282,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
             <article
               key={item.id}
               data-post-id={item.id}
-              onPlayingCapture={() => { if (item.id === activeId) playback(true); }}
+              onPlayingCapture={() => { if (item.id === activeId) { playback(true); recordFirstFrame(item.id, !!item.media_url && feedPrefetcher.isPrefetched(item.media_url)); } }}
               onPauseCapture={() => { if (item.id === activeId) playback(false); }}
               onWaitingCapture={() => { if (item.id === activeId) playback(false); }}
               aria-posinset={index + 1}
