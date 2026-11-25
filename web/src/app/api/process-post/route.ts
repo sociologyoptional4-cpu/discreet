@@ -172,9 +172,7 @@ export async function POST(request: Request): Promise<Response> {
       : { ...SILENT_ANALYSIS };
     if (post.topic_entity) analysis.topic_entity = post.topic_entity;
     const document = [analysis.topic_entity, analysis.category, analysis.ai_summary, ...analysis.key_points, transcript].join('\n');
-    const embedding = GEMINI_API_KEY
-      ? await embedText(document, 'RETRIEVAL_DOCUMENT').catch(() => null)
-      : null;
+    const embedding = await embedText(document, 'RETRIEVAL_DOCUMENT').catch(() => null);
     const vibeVec = embedding
       ? sliceAndNormalize384(embedding)
       : await generateVibeEmbedding384(document).catch(() => null);
