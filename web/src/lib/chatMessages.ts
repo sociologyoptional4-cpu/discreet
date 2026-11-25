@@ -9,7 +9,7 @@ export type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  type: 'text' | 'snap' | 'story_reply' | 'system_alert' | 'avatar_sticker';
+  type: 'text' | 'snap' | 'story_reply' | 'system_alert' | 'avatar_sticker' | 'post_share';
   client_msg_id?: string;
   r2_key?: string | null;
   motion_r2_key?: string | null;

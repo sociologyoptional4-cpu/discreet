@@ -9,7 +9,7 @@ import type { SocialActions } from '@/hooks/useSocialActions';
 import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
 import { playCue } from '@/lib/chat/spatialAudio';
-import { attachVideo, playVideo, POOL_SIZE, setVideoMuted, VideoPoolContext } from '@/lib/media/videoPool';
+import { attachVideo, markLive, playVideo, POOL_SIZE, setVideoMuted, VideoPoolContext, watchSilence } from '@/lib/media/videoPool';
 import type { FeedItem } from '@/types/social';
 
 export type FeedCardProps = {
@@ -69,6 +69,7 @@ export function FeedCard(props: FeedCardProps) {
   const toastSeq = useRef(0);
   const like = social.likeView(item);
   const creatorId = item.user_id;
+  const creatorHandle = item.creator_username;
   const follow = creatorId ? social.followView(creatorId, { following: item.following, followers: item.creator_followers_count ?? 0 }) : null;
   const isOwn = creatorId !== null && social.viewerId === creatorId;
   const name = item.is_incog ? (item.incog_alias ?? 'Anon') : `@${item.creator_username}`;
@@ -195,8 +196,8 @@ export function FeedCard(props: FeedCardProps) {
             {item.is_incog || !item.creator_username
               ? <span className="truncate text-[15px] font-bold drop-shadow">{name}</span>
               : <Link href={`/profile/${item.creator_username}`} className="truncate text-[15px] font-bold drop-shadow hover:underline">{name}</Link>}
-            {follow && !isOwn && creatorId && (
-              <FollowButton following={follow.following} onToggle={() => void social.toggleFollow(creatorId, follow.following, item.id)} />
+            {follow && !isOwn && creatorId && creatorHandle && (
+              <FollowButton following={follow.following} onToggle={() => void social.toggleFollow({ id: creatorId, username: creatorHandle }, follow.following, item.id)} />
             )}
           </div>
           <p className="mt-1 line-clamp-1 text-[13px] leading-snug text-white/85 drop-shadow">
@@ -274,8 +275,15 @@ function PostVideo({
 
   useEffect(() => {
     if (!video) return;
+    markLive(video, active && !paused);
     setVideoMuted(video, !soundOn || !active);
-  }, [video, active, soundOn]);
+    return () => markLive(video, false);
+  }, [video, active, paused, soundOn]);
+
+  useEffect(() => {
+    if (!video || !active || !soundOn) return;
+    return watchSilence(video, onSoundBlocked);
+  }, [video, active, soundOn, onSoundBlocked]);
 
   useEffect(() => {
     if (!video) return;

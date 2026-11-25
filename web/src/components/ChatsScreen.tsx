@@ -1,8 +1,9 @@
 'use client';
 import { AnimatePresence, motion } from 'framer-motion';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { StateMessage } from '@/components/StateMessage';
 import { StoryStrip } from '@/components/StoryStrip';
 import { ClayBuddy } from '@/components/chat/AvatarStickerMessage';
 import { DailyQuestPill, StreakBadge } from '@/components/chat/ChatGamification';
@@ -10,7 +11,7 @@ import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
 import { PinnedAIChatCard } from '@/components/chat/PinnedAIChatCard';
 import { useConversations } from '@/hooks/useConversations';
 import { AVATAR_META, isAvatarId } from '@/lib/avatars';
-import { fetchSuggestedCreators, requestConversation, type SuggestedCreator } from '@/lib/chatData';
+import { fetchSuggestedCreators, requestConversation, startChatWith, type SuggestedCreator } from '@/lib/chatData';
 import type { ConversationItem } from '@/lib/conversations';
 import { currentUserId } from '@/lib/session';
 import { isSupabaseConfigured } from '@/lib/supabase';
@@ -24,6 +25,17 @@ export function ChatsScreen() {
   const { incoming, accepted, isLoading, error, accept, decline } = useConversations();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [addingStory, setAddingStory] = useState(false);
+  const target = useSearchParams().get('to');
+  const [openError, setOpenError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!target) return;
+    let alive = true;
+    startChatWith(target)
+      .then((id) => { if (alive) router.replace(`/chats/${id}`); })
+      .catch((e: unknown) => { if (alive) setOpenError(e instanceof Error ? e.message : 'Could not open this chat.'); });
+    return () => { alive = false; };
+  }, [target, router]);
 
   const answer = async (id: string, kind: 'accept' | 'decline') => {
     setBusyId(id);
@@ -32,8 +44,11 @@ export function ChatsScreen() {
     if (ok && kind === 'accept') router.push(`/chats/${id}`);
   };
 
+  if (target && !openError) return <StateMessage light title={`Opening chat with @${target.replace(/^@/, '')}…`} />;
+
   return (
     <div className="pt-[max(.75rem,env(safe-area-inset-top))]">
+      {openError && <p role="alert" className="mx-4 mt-2 rounded-2xl bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700">{openError}</p>}
       <header className="flex items-end justify-between px-5 pb-1 pt-2">
         <h1 className="text-[28px] font-black tracking-tight">Chats</h1>
         <span className="pb-1.5 text-xs font-semibold text-slate-400">faceless · private</span>
@@ -98,6 +113,7 @@ function ChatRow({ chat: c, index }: { chat: ConversationItem; index: number }) 
         </span>
         <span className="min-w-0 flex-1">
           <span className={`block truncate text-[15px] ${c.unread > 0 ? 'font-black' : 'font-semibold'}`}>@{c.other.username}</span>
+          {c.lastMessageText && <span className={`block truncate text-[13px] ${c.unread > 0 ? 'font-semibold text-slate-700' : 'text-slate-500'}`}>{c.lastMessageText}</span>}
           <time dateTime={c.lastMessageAt} className="text-xs text-slate-400">{c.unread > 0 ? 'New snap or message · ' : ''}{new Date(c.lastMessageAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time>
         </span>
         <StreakBadge count={c.streak} status={c.streakExpiring ? 'expiring_soon' : 'active'} />

@@ -29,6 +29,13 @@ export async function authenticate(request: Request): Promise<{userId: string; t
   }
 }
 
+/** The signed-in viewer if the request carries a valid token; null for visitors without one. */
+export async function optionalViewer(request: Request): Promise<string | null> {
+  if (!request.headers.get('authorization')) return null;
+  const auth = await authenticate(request);
+  return auth instanceof Response ? null : auth.userId;
+}
+
 export async function rateLimit(userId: string, action: 'upload-url' | 'process-post' | 'search'): Promise<Response | null> {
   try {
     const { data, error } = await getSupabaseAdmin().rpc('check_api_rate_limit', { p_user_id: userId, p_action: action });

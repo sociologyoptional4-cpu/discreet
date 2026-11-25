@@ -11,6 +11,7 @@ import type { ChatMeta, Outgoing, Retention, SnapView, StreakStatus } from '@/ty
 import type { RecordedSnapPayload } from '@/types/privacy';
 import type { AvatarId } from '@/types/avatar';
 import { ALL_EMOJIS } from '@/lib/chat/messageFormat';
+import { encodePostShare } from '@/lib/chat/postShare';
 import { encodeSticker, parseActionEvent, type AvatarAction, type AvatarActionEvent, type StickerId } from '@/lib/chat/stickerRegistry';
 
 const PAGE = 30;
@@ -225,6 +226,7 @@ export function useChatEngine(conversationId: string, currentUserId: string) {
     streakStatus, streakCount: streakStatus === 'expired' ? 0 : meta?.streak_count ?? 0, loadOlderMessages,
     sendText: async (text: string) => { const body = text.trim(); if (body && body.length <= 2000) await send('text', body); },
     peerInRoom, reactions,
+    sendPostShare: (postId: string, note?: string) => send('post_share', encodePostShare(postId, note)),
     sendAvatarSticker: (stickerId: StickerId, avatarId: AvatarId) => send('avatar_sticker', encodeSticker(stickerId, avatarId)),
     /** Live actions go over Realtime Broadcast only; nothing is stored. The sender's own screen plays it at once. */
     triggerLiveAction: (action: AvatarAction) => {

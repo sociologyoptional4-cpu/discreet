@@ -32,12 +32,13 @@ const unlocked = new WeakSet<HTMLVideoElement>();
 /** Call inside a user gesture: briefly plays every loaded, idle pooled element with sound allowed so the browser marks it gesture-unlocked for the session. */
 export function unlockPool(pool: HTMLVideoElement[]): void {
   for (const video of pool) {
-    if (unlocked.has(video) || !video.getAttribute('src') || !video.paused) continue;
+    if (unlocked.has(video) || video.dataset.live === '1' || !video.getAttribute('src') || !video.paused) continue;
     unlocked.add(video);
-    const restore = () => { video.pause(); video.volume = 1; video.muted = true; };
+    // A fast swipe can make this element the active one before the prime settles; then it must be left alone.
+    const restore = () => { video.volume = 1; if (video.dataset.live === '1') return; video.pause(); video.muted = true; };
     video.muted = false;
     video.volume = 0;
-    video.play().then(restore, () => { unlocked.delete(video); video.volume = 1; video.muted = true; });
+    video.play().then(restore, () => { unlocked.delete(video); restore(); });
   }
 }
 
@@ -57,12 +58,30 @@ export function setVideoMuted(video: HTMLVideoElement, muted: boolean): void {
   video.muted = muted;
 }
 
-/** Plays with the wanted sound; if the browser refuses, plays muted and reports it so the UI can show muted. */
+/** Plays with the wanted sound; only when the browser refuses autoplay (NotAllowedError) does it fall back to muted and report it. An interrupted play (src swapped by a fast swipe) is not a refusal. */
 export function playVideo(video: HTMLVideoElement, withSound: boolean, onSoundBlocked: () => void): void {
   video.muted = !withSound;
-  video.play().catch(() => {
+  video.play().catch((error: unknown) => {
+    if (error instanceof DOMException && error.name === 'AbortError') return;
     video.muted = true;
     if (withSound) onSoundBlocked();
     video.play().catch(() => {});
   });
+}
+
+/** Marks the element that is currently the on-screen, playing post so background priming never touches it. */
+export function markLive(video: HTMLVideoElement, live: boolean): void {
+  if (live) video.dataset.live = '1';
+  else delete video.dataset.live;
+}
+
+/** Reports whenever the element actually plays muted, so the sound control can show the real state. */
+export function watchSilence(video: HTMLVideoElement, onSilent: () => void): () => void {
+  const check = () => { if (video.muted && !video.paused) onSilent(); };
+  video.addEventListener('playing', check);
+  video.addEventListener('volumechange', check);
+  return () => {
+    video.removeEventListener('playing', check);
+    video.removeEventListener('volumechange', check);
+  };
 }

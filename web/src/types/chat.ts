@@ -17,3 +17,42 @@ export type Outgoing = {
   attempts: number;
   retryAt: number;
 };
+
+export type ChatParticipant = {
+  id: string;
+  username: string;
+  avatarId: string;
+  avatarUrl: string | null;
+  vibeLevel: number;
+};
+
+/** One inbox row from `GET /api/chats`. */
+export type ConversationSummary = {
+  id: string;
+  status: 'pending' | 'accepted';
+  /** A request somebody else sent to the viewer, still waiting for their answer. */
+  incoming: boolean;
+  participant: ChatParticipant;
+  lastMessageText: string | null;
+  lastMessageAt: string;
+  unreadCount: number;
+};
+
+export type SharedPostPreview = {
+  id: string;
+  thumbnail_url: string | null;
+  caption: string | null;
+  post_format: 'video' | 'image' | 'recipe_avatar' | 'recipe_shayari';
+};
+
+/** A message as the chat API returns it. Not the same as the row-shaped `ChatMessage` the live thread screen keeps. */
+export type ApiChatMessage = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  type: MessageRow['type'];
+  body: string | null;
+  sharedPostId: string | null;
+  sharedPost: SharedPostPreview | null;
+  createdAt: string;
+};

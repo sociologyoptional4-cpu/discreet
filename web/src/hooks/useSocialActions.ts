@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { demoToggleFollow, demoToggleLike } from '@/lib/demoData';
 import { trackPost } from '@/lib/telemetry';
+import { FollowRequestError, requestFollowToggle } from '@/lib/followClient';
 import { currentUserId, ensureSession } from '@/lib/session';
 import { isDemoMode, supabase } from '@/lib/supabase';
 
@@ -17,7 +18,7 @@ export type SocialActions = {
   likeView: (post: { id: string; liked: boolean; likes_count: number }) => { liked: boolean; count: number };
   followView: (creatorId: string, base: { following: boolean; followers: number }) => { following: boolean; followers: number };
   toggleLike: (postId: string, currentlyLiked: boolean) => Promise<void>;
-  toggleFollow: (creatorId: string, currentlyFollowing: boolean, postId?: string) => Promise<void>;
+  toggleFollow: (creator: { id: string; username: string }, currentlyFollowing: boolean, postId?: string) => Promise<void>;
   error: string | null;
   clearError: () => void;
 };
@@ -78,7 +79,8 @@ export function useSocialActions(): SocialActions {
     }
   }, []);
 
-  const toggleFollow = useCallback(async (creatorId: string, currentlyFollowing: boolean, postId?: string) => {
+  const toggleFollow = useCallback(async (creator: { id: string; username: string }, currentlyFollowing: boolean, postId?: string) => {
+    const creatorId = creator.id;
     const key = `follow:${creatorId}`;
     if (inFlight.current.has(key)) return;
     inFlight.current.add(key);
@@ -89,19 +91,19 @@ export function useSocialActions(): SocialActions {
     try {
       const session = await ensureSession();
       setViewerId(session.user.id);
-      if (session.user.id === creatorId) throw new Error('self');
+      if (session.user.id === creatorId) throw new FollowRequestError(400, 'You cannot follow yourself');
       if (isDemoMode) {
         demoToggleFollow(creatorId, currentlyFollowing);
         return;
       }
-      const result = currentlyFollowing
-        ? await supabase.from('follows').delete().eq('follower_id', session.user.id).eq('following_id', creatorId)
-        : await supabase.from('follows').insert({ follower_id: session.user.id, following_id: creatorId });
-      if (result.error && result.error.code !== UNIQUE_VIOLATION) throw result.error;
-      if (!result.error && postId && !currentlyFollowing) trackPost(postId, 'follow_from_post');
-    } catch {
+      const result = await requestFollowToggle(creator.username, session.access_token);
+      if (result.isFollowing === currentlyFollowing) apply(-1, currentlyFollowing);
+      else if (postId && result.isFollowing) trackPost(postId, 'follow_from_post');
+    } catch (caught) {
       apply(-1, currentlyFollowing);
-      setError(currentlyFollowing ? 'Could not unfollow.' : 'Could not follow.');
+      if (caught instanceof FollowRequestError && caught.status === 401) setError('Sign in to follow creators.');
+      else if (caught instanceof FollowRequestError && caught.status === 404) setError('This creator no longer exists.');
+      else setError(currentlyFollowing ? 'Could not unfollow.' : 'Could not follow.');
     } finally {
       inFlight.current.delete(key);
     }

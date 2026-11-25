@@ -3,8 +3,8 @@ import { ensureSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 import { safeRandomUUID } from '@/lib/uuid';
 
-const COLUMNS =
-  'id, user_a, user_b, status, initiator_id, request_note, last_message_at, user_a_unread, user_b_unread, streak_count, streak_updated_at, a:users!user_a(id, username, avatar_id), b:users!user_b(id, username, avatar_id)';
+// `*` rather than a column list, so databases without the newest columns (last_message_text) still load.
+const COLUMNS = '*, a:users!user_a(id, username, avatar_id), b:users!user_b(id, username, avatar_id)';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UNIQUE_VIOLATION = '23505';
 
@@ -92,4 +92,17 @@ export async function fetchSuggestedCreators(viewerId: string, exclude: readonly
   return (data as { id: string; username: string; avatar_id: string }[])
     .filter((u) => !exclude.includes(u.id))
     .map((u) => ({ id: u.id, username: u.username, avatarId: u.avatar_id }));
+}
+
+/** Opens (or creates) the conversation with a creator by @handle, for `/chats?to=<username>` links. */
+export async function startChatWith(username: string): Promise<string> {
+  const session = await ensureSession();
+  const response = await fetch('/api/chats/start', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username }),
+  });
+  const body = (await response.json().catch(() => null)) as { id?: string; error?: string } | null;
+  if (!response.ok || !body?.id) throw new Error(body?.error ?? 'Could not open this chat.');
+  return body.id;
 }

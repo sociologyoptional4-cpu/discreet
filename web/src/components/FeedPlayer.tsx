@@ -3,26 +3,28 @@ import { LayoutGroup } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AvatarPickerRail } from '@/components/AvatarPickerRail';
 import { MaskPlayback } from '@/components/MaskPlayback';
 import { fetchMotionTrack } from '@/lib/mocap/motionCodec';
-import type { AvatarId } from '@/types/avatar';
 import { FeedCard } from '@/components/FeedCard';
 import { LiquidWarpCard } from '@/components/LiquidWarpCard';
 import { ComboBurstLayer, useComboBurst } from '@/components/chat/EmojiReactionSystem';
 import { AIFeedNudge, type FeedNudge } from '@/components/feed/AIFeedNudge';
 import { AuroraEdgeGlow } from '@/components/feed/AuroraEdgeGlow';
 import { CommentsDrawer } from '@/components/feed/CommentsDrawer';
+import { ShareToChatSheet } from '@/components/feed/ShareToChatSheet';
+import { EdgeEmojiArc } from '@/components/feed/EdgeEmojiArc';
 import { FeedGamificationHUD, type FeedMilestone } from '@/components/feed/FeedGamificationHUD';
+import { LiquidGlassNav } from '@/components/feed/LiquidGlassNav';
+import { FALLBACK_RGB, useVideoAmbientColor } from '@/hooks/useVideoAmbientColor';
+import { AVATAR_META } from '@/lib/avatars';
 import { useFeedEngine } from '@/hooks/useFeedEngine';
 import { trackPost } from '@/lib/telemetry';
 import { counterTakeUrl } from '@/lib/feedClient';
 import { useSocialActions } from '@/hooks/useSocialActions';
-import { findConversationWith } from '@/lib/chatData';
 import { setImmersive } from '@/lib/immersive';
-import { ensureSession } from '@/lib/session';
 import { handleShare } from '@/lib/share';
-import { playCue, primeAudio } from '@/lib/chat/spatialAudio';
+import { primeAudio } from '@/lib/chat/spatialAudio';
+import { hapticTick } from '@/lib/haptics';
 import { createVideoPool, disposeVideoPool, unlockPool, VideoPoolContext } from '@/lib/media/videoPool';
 import type { FeedItem } from '@/types/social';
 
@@ -33,8 +35,8 @@ const GAP_PX = 0;
 type Props = { items: FeedItem[]; paginate: boolean; snapshot: string };
 
 /** Session-only XP: nothing is stored, a fresh visit starts at zero. */
-const XP = { watch: 5, react: 10, milestone: 20 } as const;
-const LEVEL_XP = 100;
+const XP = { milestone: 20 } as const;
+const DIM_AFTER_MS = 3500;
 const WATCH_MILESTONE = 5;
 const REACT_MILESTONE = 3;
 const NUDGE_AFTER = 3;
@@ -42,6 +44,13 @@ const MILESTONE_MS = 2000;
 const NUDGE_MS = 8000;
 
 /** The next post ahead from a creator you follow, if any: the AI nudge points at it. */
+/** Tint for posts with no readable video frame (3D posts, other hosts): the creator's avatar colour. */
+function accentFallback(item: FeedItem | null | undefined): string {
+  const accent = item?.creator_avatar_id ? AVATAR_META[item.creator_avatar_id].accent : null;
+  const m = accent?.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  return m ? `${parseInt(m[1], 16)} ${parseInt(m[2], 16)} ${parseInt(m[3], 16)}` : FALLBACK_RGB;
+}
+
 function followedAhead(items: FeedItem[], from: number): FeedItem | undefined {
   return items.slice(from + 1).find((i) => i.following && !i.is_incog && i.creator_username);
 }
@@ -83,29 +92,32 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   }, [maskHost, active]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
+  const [sharePost, setSharePost] = useState<FeedItem | null>(null);
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
   const [pausedId, setPausedId] = useState<string | null>(null);
   const [soundOn, setSoundOn] = useState(true);
   const [note, setNote] = useState<string | null>(null);
-  const [style, setStyle] = useState<{ postId: string; avatarId: AvatarId } | null>(null);
-  const styleFor = (item: FeedItem): AvatarId | null => (style?.postId === item.id ? style.avatarId : item.avatar_id);
   const previousIndex = useRef<number | null>(null);
   const social = useSocialActions();
   const burst = useComboBurst();
   const [pulse, setPulse] = useState(0);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [xp, setXp] = useState(0);
   const [milestone, setMilestone] = useState<FeedMilestone | null>(null);
   const [nudge, setNudge] = useState<FeedNudge | null>(null);
-  const [dimmed, setDimmed] = useState(false);
-  const [navOpen, setNavOpen] = useState(false);
   const watched = useRef(new Set<string>());
   const reacted = useRef(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [navOpen, setNavOpen] = useState(false);
+  const [dimmed, setDimmed] = useState(false);
+  const [touchSeq, setTouchSeq] = useState(0);
+  useEffect(() => {
+    const id = window.setTimeout(() => setDimmed(true), DIM_AFTER_MS);
+    return () => window.clearTimeout(id);
+  }, [touchSeq, active?.id]);
+  useVideoAmbientColor(rootRef, scrollerRef, active?.mode === 'mask' ? undefined : active?.id, accentFallback(active));
   const nudged = useRef(false);
 
   const celebrate = (emoji: string, label: string) => {
     const key = Date.now();
-    setXp((v) => v + XP.milestone);
     setMilestone({ key, emoji, label, xp: XP.milestone });
     setTimeout(() => setMilestone((m) => (m?.key === key ? null : m)), MILESTONE_MS);
   };
@@ -127,20 +139,12 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
     if (previousIndex.current !== null && previousIndex.current !== activeIndex && activeId) {
       const now = Date.now();
       setPulse(now);
-      setPickerOpen(false);
-      // Soft haptic vibration + subtle tactile audio cue on every card swipe
-      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-        try {
-          navigator.vibrate(15);
-        } catch {
-          // ignore
-        }
-      }
-      playCue('swipe_tick', 0);
+      setNavOpen(false);
+      // One silent haptic tick per settled video; no swipe sound.
+      hapticTick(now);
       // Each post earns XP once, so scrolling back and forth (or a scroll that flickers between two cards) can't farm it.
       if (!watched.current.has(activeId)) {
         watched.current.add(activeId);
-        setXp((v) => v + XP.watch);
         if (watched.current.size % WATCH_MILESTONE === 0) {
           if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
             try {
@@ -207,33 +211,24 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
     else if (result === 'failed') flash('Could not share this post');
   };
 
-  /**
-   * A typed vibe goes to the creator as a chat draft when you already talk; otherwise to their profile, where a chat
-   * request with a reason can be sent (the text cannot travel there, so the toast says so).
-   */
-  const sendVibe = async (item: FeedItem, text: string) => {
-    if (!item.user_id || !item.creator_username) return;
-    try {
-      const session = await ensureSession();
-      const existing = await findConversationWith(session.user.id, item.user_id);
-      if (existing?.status === 'accepted') {
-        router.push(`/chats/${existing.id}?draft=${encodeURIComponent(text)}`);
-        return;
-      }
-    } catch {
-      // fall through to the profile
-    }
-    trackPost(item.id, 'profile_visit');
-    flash(`Send @${item.creator_username} a chat request first`);
-    router.push(`/profile/${item.creator_username}`);
-  };
-
   const react = (emoji: string, x: number, y: number) => {
     burst.fire(emoji, x, y);
     setPulse(Date.now());
-    setXp((v) => v + XP.react);
     reacted.current += 1;
     if (reacted.current % REACT_MILESTONE === 0) celebrate('💖', `${reacted.current} reactions`);
+  };
+
+  /** Reactions from the edge wheel: the heart is the real like, every emoji bursts. */
+  const arcReact = (emoji: string, x: number, y: number) => {
+    if (!active) return;
+    if (emoji === '❤️' && !social.likeView(active).liked) void social.toggleLike(active.id, false);
+    react(emoji, x, y);
+  };
+
+  /** Any touch brings the overlays back; they dim again after a stretch of uninterrupted watching. */
+  const wake = () => {
+    setDimmed(false);
+    setTouchSeq((n) => n + 1);
   };
 
   const jumpTo = (postId: string) => {
@@ -243,15 +238,12 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
 
   return (
     <VideoPoolContext.Provider value={videoPool}>
-    <div onPointerDownCapture={unlockAudio} onTouchStartCapture={unlockAudio} className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-black text-white">
+    <div ref={rootRef} onPointerDownCapture={() => { unlockAudio(); wake(); }} onTouchStartCapture={unlockAudio}
+      className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-black text-white [--feed-accent-rgb:165_180_252]">
       {maskHost && active?.mode === 'mask' && createPortal(
         <>
-          <MaskPlayback avatarId={styleFor(active)} motionUrl={active.motion_url} audioUrl={active.media_url} soundOn={soundOn} paused={pausedId === active.id} barRef={maskBar}
+          <MaskPlayback avatarId={active.avatar_id} motionUrl={active.motion_url} audioUrl={active.media_url} soundOn={soundOn} paused={pausedId === active.id} barRef={maskBar}
             onPlayback={playback} />
-          {/* Try the clip on another character, opened from the PiP card. Local only: the post itself is unchanged. */}
-          {pickerOpen && (
-            <AvatarPickerRail orientation="vertical" className="absolute right-3 top-[calc(max(0.75rem,env(safe-area-inset-top))+6.25rem)] z-10 scale-90" selected={styleFor(active) ?? 'cyber_monk'} onSelect={(id) => setStyle({ postId: active.id, avatarId: id })} />
-          )}
         </>, maskHost,
       )}
       <LayoutGroup>
@@ -294,7 +286,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
                 onSoundBlocked={() => setSoundOn(false)}
                 onCounterTake={() => router.push(counterTakeUrl(item.topic_entity))}
                 onNotInterested={() => { notInterested(item); flash('Not interested'); }}
-                onShare={() => void share(item)}
+                onShare={() => setSharePost(item)}
                 dimmed={dimmed}
                 onReact={react}
                 commentsCount={commentCounts[item.id] ?? item.comments_count ?? 0}
@@ -308,6 +300,8 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
       </LayoutGroup>
       <AuroraEdgeGlow emotion={active?.emotion_tag} pulse={pulse} />
       <FeedGamificationHUD milestone={milestone} />
+      <EdgeEmojiArc rootRef={rootRef} onReact={arcReact} disabled={!active} />
+      <LiquidGlassNav open={navOpen} onOpenChange={setNavOpen} />
       <AIFeedNudge nudge={nudge} onDismiss={() => setNudge(null)}
         onAction={() => { const target = followedAhead(items, activeIndex); if (target) jumpTo(target.id); else setNudge(null); }} />
       <CommentsDrawer
@@ -316,6 +310,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
         onClose={() => setCommentsPostId(null)}
         onCountChange={(pid, count) => setCommentCounts((prev) => (prev[pid] === count ? prev : { ...prev, [pid]: count }))}
       />
+      <ShareToChatSheet post={sharePost} onClose={() => setSharePost(null)} onShareLink={(item) => void share(item)} />
       <ComboBurstLayer bursts={burst.bursts} />
 
       {(note || social.error) && (

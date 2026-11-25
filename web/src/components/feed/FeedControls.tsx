@@ -20,14 +20,14 @@ export function FollowButton({ following, onToggle }: { following: boolean; onTo
   };
   return (
     <motion.button type="button" onClick={tap} aria-pressed={following} layout whileTap={{ scale: 0.9 }} transition={SPRING}
-      className={`relative flex h-8 shrink-0 items-center gap-1 overflow-hidden rounded-full border px-3 text-xs font-bold backdrop-blur-md focus-visible:outline-2 focus-visible:outline-white ${following ? 'border-white/20 bg-white/10 text-white/85' : 'border-white/35 bg-white/20 text-white shadow-[0_0_18px_rgba(255,255,255,.25)]'}`}>
+      className={`relative flex h-[1.625rem] shrink-0 items-center gap-1 overflow-hidden rounded-full border px-2.5 text-[15px] font-bold leading-none backdrop-blur-md focus-visible:outline-2 focus-visible:outline-white ${following ? 'border-white/20 bg-white/10 text-white/85' : 'border-white/35 bg-white/20 text-white shadow-[0_0_18px_rgba(255,255,255,.25)]'}`}>
       {!following && !reduce && (
         <motion.span aria-hidden className="pointer-events-none absolute inset-y-0 w-8 -skew-x-12 bg-gradient-to-r from-transparent via-white/45 to-transparent"
           initial={{ x: -40 }} animate={{ x: 120 }} transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 1.8, ease: 'easeInOut' }} />
       )}
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.span key={String(following)} initial={{ y: 12, opacity: 0, scale: 0.6 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: -12, opacity: 0 }} transition={SPRING} className="relative flex items-center gap-1">
-          {following ? <><Check aria-hidden className="size-3.5" />Following</> : 'Follow'}
+          {following ? <><Check aria-hidden className="size-4" />Following</> : 'Follow'}
         </motion.span>
       </AnimatePresence>
       {burst > 0 && !reduce && (

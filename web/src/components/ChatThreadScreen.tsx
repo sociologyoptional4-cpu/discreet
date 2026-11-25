@@ -11,6 +11,7 @@ import { AvatarStickerDrawer } from '@/components/chat/AvatarStickerDrawer';
 import { AvatarStickerMessage, ClayBuddy } from '@/components/chat/AvatarStickerMessage';
 import { LevelUpModal, StreakBadge, VibeMeter, useChatXp } from '@/components/chat/ChatGamification';
 import { DuoHangoutRoom } from '@/components/chat/DuoHangoutRoom';
+import { SharedPostCard } from '@/components/chat/SharedPostCard';
 import { ComboBurstLayer, Emoji3D, ReactionChips, ReactionPill, useComboBurst } from '@/components/chat/EmojiReactionSystem';
 import { ACTION_SECONDS, LiveAvatarActionStage, type StageEvent } from '@/components/chat/LiveAvatarActionStage';
 import { SwipeableMessageBubble } from '@/components/chat/SwipeableMessageBubble';
@@ -278,6 +279,8 @@ function MessageRow({ message: m, mine, reactions, reacting, chat, onReply, onOp
     body = <HoldToViewSnap message={m} isOwnMessage={mine} onOpen={chat.openSnap} canReplay={chat.canReplay(m.id)} onSignal={chat.signalCapture} onQuickReact={(e) => onReact(e)} />;
   } else if (m.type === 'avatar_sticker') {
     body = <AvatarStickerMessage content={m.content} mine={mine} />;
+  } else if (m.type === 'post_share') {
+    body = <SharedPostCard content={m.content} mine={mine} />;
   } else {
     const { quote, body: textBody } = parseReply(m.content ?? '');
     const big = !quote && isSingleEmoji(textBody);

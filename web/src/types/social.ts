@@ -47,6 +47,42 @@ export type Profile = {
   total_likes_received: number;
 };
 
+export type CreatorBadge = { id: string; label: string };
+
+/** A creator as shown on a profile page: the stored profile plus gamification and what the visitor has done. */
+export type CreatorProfile = Profile & {
+  vibe_xp: number;
+  vibe_level: number;
+  badges: CreatorBadge[];
+};
+
+/** One tile of a profile grid. `caption` is the post's AI summary; `expires_at` is null for permanent posts. */
+export type ProfilePostSummary = {
+  id: string;
+  thumbnail_url: string | null;
+  media_url: string;
+  post_format: 'video' | 'image' | 'recipe_avatar' | 'recipe_shayari';
+  caption: string | null;
+  comments_count: number;
+  expires_at: string | null;
+  created_at: string;
+  emotion_tag: PublicPost['emotion_tag'];
+  sentiment: Sentiment | null;
+};
+
+/** Reply of `GET /api/users/[username]`. Incog posts are never included. */
+export type ProfilePageResponse = {
+  profile: CreatorProfile;
+  isOwnProfile: boolean;
+  isFollowing: boolean;
+  postsCount: number;
+  permanentPosts: ProfilePostSummary[];
+  burnerPosts: ProfilePostSummary[];
+};
+
+/** Reply of `POST /api/users/[username]/follow`. */
+export type FollowToggleResponse = { isFollowing: boolean; followersCount: number };
+
 /** The self-describing motion track stored next to a 3D mask post's audio. */
 export type MotionTrackFile = {
   fps: number;

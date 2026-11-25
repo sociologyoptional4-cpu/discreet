@@ -11,6 +11,7 @@ export type ConversationRow = {
   initiator_id: string;
   request_note: string | null;
   last_message_at: string;
+  last_message_text?: string | null;
   user_a_unread?: number;
   user_b_unread?: number;
   streak_count?: number;
@@ -25,6 +26,7 @@ export type ConversationItem = {
   initiatorId: string;
   requestNote: string | null;
   lastMessageAt: string;
+  lastMessageText: string | null;
   unread: number;
   streak: number;
   /** More than 20 hours since the last mutual snap: the streak ends at 24. */
@@ -48,6 +50,7 @@ export function toConversationItem(row: ConversationRow, viewerId: string): Conv
     initiatorId: row.initiator_id,
     requestNote: row.request_note,
     lastMessageAt: row.last_message_at,
+    lastMessageText: row.last_message_text ?? null,
     unread: (row.user_a === viewerId ? row.user_a_unread : row.user_b_unread) ?? 0,
     streak: row.streak_updated_at && Date.now() - Date.parse(row.streak_updated_at) < 86400000 ? row.streak_count ?? 0 : 0,
     streakExpiring: !!row.streak_updated_at && (row.streak_count ?? 0) > 0 && Date.now() - Date.parse(row.streak_updated_at) > 72000000 && Date.now() - Date.parse(row.streak_updated_at) < 86400000,

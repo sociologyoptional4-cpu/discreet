@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Suspense } from 'react';
-import { ProfileScreen } from '@/components/ProfileScreen';
+import { CreatorProfileScreen } from '@/components/profile/CreatorProfileScreen';
 import { StateMessage } from '@/components/StateMessage';
 import { getProfileSummary } from '@/lib/profileMeta';
 
@@ -30,7 +30,7 @@ export async function generateMetadata({ params }: PageProps<'/profile/[username
 
 async function Profile({ params }: PageProps<'/profile/[username]'>) {
   const { username } = await params;
-  return <ProfileScreen username={decodeURIComponent(username)} />;
+  return <CreatorProfileScreen username={decodeURIComponent(username).replace(/^@/, '').toLowerCase()} />;
 }
 
 export default function ProfilePage(props: PageProps<'/profile/[username]'>) {
