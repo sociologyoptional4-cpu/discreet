@@ -2,7 +2,6 @@ import vm from 'node:vm';
 import { generateLivingPost, type LLMCompleteFn, type LLMMessage } from '@/lib/living/recursiveAgent';
 import { authenticate, json, rateLimit } from '@/lib/server/request';
 
-export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const MAX_PROMPT_CHARS = 500;

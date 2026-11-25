@@ -4,8 +4,6 @@ import { quantizeToInt8 } from '@/lib/localBrain/quantizedVector';
 import { getSupabaseAdmin } from '@/lib/server/admin';
 import type { PublicPost } from '@/types/social';
 
-export const revalidate = 60; // Re-query Supabase at most once per 60s globally
-
 const POOL_LIMIT = 150;
 
 export async function GET() {
