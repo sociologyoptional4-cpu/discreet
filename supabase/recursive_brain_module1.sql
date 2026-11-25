@@ -179,43 +179,47 @@ BEGIN
 
   RETURN QUERY
   WITH vec_ids AS (
-    SELECT p.id
+    SELECT p.id, 1 AS prio
     FROM public.posts p
     WHERE v_taste IS NOT NULL
       AND p.vibe_embedding IS NOT NULL
-      AND post_is_live(p.expires_at)
+      AND (p.expires_at IS NULL OR p.expires_at > now())
       AND NOT (p.id = ANY(coalesce(p_seen_ids, '{}')))
     ORDER BY p.vibe_embedding <=> v_taste
     LIMIT v_vec_cap
   ),
   fresh_ids AS (
-    SELECT p.id
+    SELECT p.id, 2 AS prio
     FROM public.posts p
-    WHERE post_is_live(p.expires_at)
+    WHERE (p.expires_at IS NULL OR p.expires_at > now())
       AND NOT (p.id = ANY(coalesce(p_seen_ids, '{}')))
     ORDER BY p.created_at DESC
     LIMIT v_cap
   ),
   combined_ids AS (
-    SELECT id FROM vec_ids
-    UNION
-    SELECT id FROM fresh_ids
+    SELECT id, min(prio) AS prio
+    FROM (
+      SELECT id, prio FROM vec_ids
+      UNION ALL
+      SELECT id, prio FROM fresh_ids
+    ) u
+    GROUP BY id
   ),
   limited_ids AS (
     SELECT c.id
     FROM combined_ids c
     JOIN public.posts p ON p.id = c.id
-    ORDER BY p.created_at DESC
+    ORDER BY c.prio ASC, p.created_at DESC
     LIMIT v_cap
   )
   SELECT
     to_jsonb(v) AS post,
-    CASE
+    (CASE
       WHEN v_taste IS NOT NULL AND p.vibe_embedding IS NOT NULL
         THEN greatest(0.0, least(1.0, (2.0 - (p.vibe_embedding <=> v_taste)) / 2.0))
       ELSE 0.5
-    END AS vibe_similarity,
-    greatest(
+    END)::double precision AS vibe_similarity,
+    (greatest(
       0.0,
       (
         p.pheromone_score
@@ -227,10 +231,10 @@ BEGIN
           THEN 0.15
         ELSE 1.0
       END
-    ) AS pheromone_raw,
-    greatest(0.0, extract(epoch FROM (now() - p.created_at)) / 3600.0) AS age_hours,
-    p.alpha_score,
-    p.beta_score
+    ))::double precision AS pheromone_raw,
+    (greatest(0.0, extract(epoch FROM (now() - p.created_at)) / 3600.0))::double precision AS age_hours,
+    p.alpha_score::double precision,
+    p.beta_score::double precision
   FROM limited_ids l
   JOIN public.public_posts v ON v.id = l.id
   JOIN public.posts p ON p.id = l.id

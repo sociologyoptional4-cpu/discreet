@@ -21,6 +21,12 @@ export async function authenticate(request: Request): Promise<{userId: string; t
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
   try {
+    // Prefer local JWT claims verification (cached JWKS) to avoid a ~250ms Auth network hop per API call.
+    const { data: claimsData, error: claimsErr } = await client.auth.getClaims(token);
+    const sub = claimsData?.claims?.sub;
+    if (!claimsErr && typeof sub === 'string' && sub.length > 0) {
+      return { userId: sub, token, client };
+    }
     const { data, error } = await client.auth.getUser(token);
     if (error || !data.user) return json({ error: 'Sign in first.' }, 401);
     return { userId: data.user.id, token, client };
