@@ -2,7 +2,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Play } from 'lucide-react';
 import { Emoji3D } from '@/components/chat/EmojiReactionSystem';
 import { CommentOrb, FollowButton, ShareOrb, SoundOrb } from '@/components/feed/FeedControls';
@@ -64,7 +64,7 @@ const stop = (event: MouseEvent): void => event.stopPropagation();
 /**
  * One full-screen post, video first: only the creator, a one-line caption and three glass controls float at the top. Reactions live behind the left edge (EdgeEmojiArc). Tap pauses, double-tap likes, long-press hides.
  */
-export function FeedCard(props: FeedCardProps) {
+export const FeedCard = memo(function FeedCard(props: FeedCardProps) {
   const { item, active, near, expanded, paused, soundOn, social, onExpand, onTogglePause, onToggleSound, onShare, onReact } = props;
   const longPress = useNegativeFeedback(props.onNotInterested);
   const barRef = useRef<HTMLDivElement>(null);
@@ -107,6 +107,16 @@ export function FeedCard(props: FeedCardProps) {
     () => (item.post_format === 'living_post' ? parseLivingPostRecipe(item.recipe_data) : null),
     [item.post_format, item.recipe_data],
   );
+  const [sceneReady, setSceneReady] = useState(false);
+  useEffect(() => {
+    if (!active || !recipe) return;
+    const id = window.setTimeout(() => setSceneReady(true), 80);
+    return () => {
+      window.clearTimeout(id);
+      setSceneReady(false);
+    };
+  }, [active, recipe]);
+
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const [stillFailedUrl, setStillFailedUrl] = useState<string | null>(null);
   // Photo posts are still images. A video that fails to load is tried as an image once (older photo posts were saved
@@ -208,7 +218,7 @@ export function FeedCard(props: FeedCardProps) {
             postId={item.id}
           />
         ) : recipe ? (
-          active ? (
+          active && sceneReady ? (
             <PlayableSceneCanvas recipe={recipe} isActive={active} isMuted={!soundOn} />
           ) : item.thumbnail_url ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -279,7 +289,7 @@ export function FeedCard(props: FeedCardProps) {
       </header>
     </div>
   );
-}
+});
 
 /** Plays a post through one of the feed's three persistent <video> elements, moved into this card while it is near. */
 function PostVideo({

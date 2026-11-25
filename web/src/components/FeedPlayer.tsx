@@ -323,7 +323,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
         {items.map((item, index) => {
           const dist = Math.abs(index - activeIndex);
           const near = dist <= 1;
-          const mounted = dist <= 2;
+          const mounted = dist <= 1;
           return (
           <article
             key={item.id}
@@ -333,7 +333,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
             onWaitingCapture={() => { if (item.id === activeId) playback(false); }}
             aria-posinset={index + 1}
             aria-setsize={items.length}
-            className="relative w-full snap-center snap-always"
+            className="relative w-full snap-center [contain:layout_style_paint]"
             style={{ height: `calc(100dvh - ${PEEK_PX * 2}px)`, marginBottom: GAP_PX }}
           >
             {mounted ? (
