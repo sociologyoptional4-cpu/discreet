@@ -8,4 +8,4 @@ export const EVENT_NAMES = [
 export type EventName = typeof EVENT_NAMES[number];
 export type PostEvent = { id: string; post_id: string; event_type: EventName; value: number };
 export type DiversityContext = Pick<PublicPost, 'user_id' | 'topic_entity' | 'mode' | 'emotion_tag'>;
-export type FeedPage = { posts: PublicPost[]; cursor: string; hasMore: boolean };
+export type FeedPage = { posts: PublicPost[]; cursor: string; hasMore: boolean; genomeId?: string };

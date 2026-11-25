@@ -36,7 +36,7 @@ export async function optionalViewer(request: Request): Promise<string | null> {
   return auth instanceof Response ? null : auth.userId;
 }
 
-export async function rateLimit(userId: string, action: 'upload-url' | 'process-post' | 'search' | 'living-generate'): Promise<Response | null> {
+export async function rateLimit(userId: string, action: 'upload-url' | 'process-post' | 'search' | 'living-generate' | 'brain-signal'): Promise<Response | null> {
   try {
     const { data, error } = await getSupabaseAdmin().rpc('check_api_rate_limit', { p_user_id: userId, p_action: action });
     if (error || typeof data !== 'boolean') throw new Error('Rate limit check unavailable.');

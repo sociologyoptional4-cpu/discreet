@@ -258,6 +258,15 @@ export function LivingPostStudio() {
       }
 
       setPublishProgress(1);
+      void fetch('/api/brain/embed-post', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ postId }),
+        keepalive: true,
+      }).catch(() => {});
       router.push('/feed?posted=1');
     } catch (err) {
       setStatusError(err instanceof Error ? err.message : 'Publish failed.');

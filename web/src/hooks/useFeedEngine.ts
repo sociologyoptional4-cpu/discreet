@@ -12,6 +12,7 @@ import {
   recordWatchedPost,
 } from '@/lib/feed/sessionContext';
 import { isDemoMode, supabase } from '@/lib/supabase';
+import { queueBrainSwipe, startBrainSignals } from '@/lib/brain/brainClient';
 import { startTelemetry, trackPost } from '@/lib/telemetry';
 import type { FeedItem, PublicPost } from '@/types/social';
 
@@ -101,6 +102,19 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
       trackPost(state.item.id, 'rewatch_count', Math.max(0, Math.ceil(watch / duration) - 1));
     }
 
+    const effectiveWatchMs = state.playMs > 0 ? state.playMs : state.visibleMs;
+    const effectiveDurationMs = duration > 0 ? duration : 15_000;
+    const watchRatio = effectiveWatchMs / effectiveDurationMs;
+    const fastSkip = Boolean(swipeTo && state.visibleMs < 2000);
+    queueBrainSwipe({
+      postId: state.item.id,
+      watchRatio,
+      rewatched: watchRatio >= 1.35,
+      shared: false,
+      liked: Boolean(state.item.liked),
+      fastSkip,
+    });
+
     const itemMeta = state.item as FeedItem & { category?: string | null; key_points?: string[] | null };
     const updatedCtx = recordWatchedPost({
       postId: state.item.id,
@@ -153,6 +167,7 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
   }, [active, finish, tick]);
 
   useEffect(startTelemetry, []);
+  useEffect(startBrainSignals, []);
 
   const select = useCallback((id: string) => {
     if (clock.current && clock.current.item.id !== id) finish(id);

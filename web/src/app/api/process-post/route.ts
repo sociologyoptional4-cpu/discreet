@@ -1,6 +1,8 @@
 import { getSupabaseAdmin } from '@/lib/server/admin';
+import { formatPgVector } from '@/lib/brain/tasteVector';
 import { authenticate, isUuid, json, rateLimit } from '@/lib/server/request';
 import { embedText } from '@/lib/server/embedding';
+import { generateVibeEmbedding384 } from '@/lib/server/vibeEmbedding';
 import { ownsPublicMedia } from '@/lib/server/storage';
 import { EMOTION_TAGS, type EmotionTag } from '@/lib/emotions';
 import { CATEGORIES, type Category, type Sentiment } from '@/types/social';
@@ -170,9 +172,16 @@ export async function POST(request: Request): Promise<Response> {
       : { ...SILENT_ANALYSIS };
     if (post.topic_entity) analysis.topic_entity = post.topic_entity;
     const document = [analysis.topic_entity, analysis.category, analysis.ai_summary, ...analysis.key_points, transcript].join('\n');
-    const embedding = GEMINI_API_KEY ? await embedText(document, 'RETRIEVAL_DOCUMENT').catch(() => null) : null;
+    const [embedding, vibeVec] = await Promise.all([
+      GEMINI_API_KEY ? embedText(document, 'RETRIEVAL_DOCUMENT').catch(() => null) : Promise.resolve(null),
+      generateVibeEmbedding384(document).catch(() => null),
+    ]);
     const result = await admin.from('posts').update({
-      transcript, ...analysis, embedding: embedding ? JSON.stringify(embedding) : null, processing_lease_until: null,
+      transcript,
+      ...analysis,
+      embedding: embedding ? JSON.stringify(embedding) : null,
+      vibe_embedding: vibeVec ? formatPgVector(vibeVec) : null,
+      processing_lease_until: null,
     }).eq('id', post.id).eq('user_id', auth.userId).eq('processing_lease_until', lease)
       .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`).select('id').maybeSingle();
     if (result.error) return json({ error: 'Could not save the analysis.' }, 503);
