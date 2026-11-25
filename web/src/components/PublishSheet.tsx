@@ -3,7 +3,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Clock, Ghost, Infinity as InfinityIcon } from 'lucide-react';
-import { publishPost, type PublishInput } from '@/lib/publishPost';
+import { smartUploadQueue } from '@/lib/media/smartUploadQueue';
+import { publishPost, resolvePostTopic, type PublishInput } from '@/lib/publishPost';
+import { describeMedia } from '@/lib/r2Upload';
+import { isDemoMode } from '@/lib/supabase';
 import type { MaskRecordingPayload } from '@/types/avatar';
 import type { ExpiryTier, RecordedSnapPayload } from '@/types/privacy';
 
@@ -11,7 +14,7 @@ type Props = {
   /** Called when Upload is tapped, so it reads the latest recording at that moment. Return null to do nothing. */
   buildInput: (expiry: ExpiryTier, isIncog: boolean) => PublishInput | null;
   onRetake: () => void;
-  /** Runs after the post is live, just before the redirect to /feed. */
+  /** Runs once the post is saved for publishing, just before the redirect to /feed. */
   onPublished?: (postId: string) => void;
   /** Optional local download URL & filename for the circular Download button. */
   downloadUrl?: string;
@@ -71,6 +74,24 @@ export function PublishSheet({ buildInput, onPublished, downloadUrl, downloadNam
         setStatus({ phase: 'idle', progress: 0, error: null });
       } catch (error) {
         setStatus({ phase: 'idle', progress: 0, error: error instanceof Error ? error.message : 'Could not send. Try again.' });
+      }
+      return;
+    }
+    if (input.kind === 'snap' && !isDemoMode) {
+      // Videos publish in the background: save the clip, go to the feed at once, and let the status pill show the rest.
+      setStatus({ phase: 'uploading', progress: 0, error: null });
+      try {
+        const topic = resolvePostTopic(input.topic);
+        const { durationSec, mode } = describeMedia(input);
+        const postId = await smartUploadQueue.enqueue(
+          input.payload.blob,
+          { mode, durationSec, topic, expiryTier: input.isIncog ? '1d' : input.expiryTier, isIncog: input.isIncog },
+          topic ?? '',
+        );
+        onPublished?.(postId);
+        router.push('/feed');
+      } catch (error) {
+        setStatus({ phase: 'idle', progress: 0, error: error instanceof Error ? error.message : 'Could not save your post. Try again.' });
       }
       return;
     }

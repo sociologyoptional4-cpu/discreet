@@ -9,7 +9,8 @@ export type MediaInput =
 
 export type UploadedMedia = { mediaUrl: string; motionUrl: string | null };
 
-type Upload = { blob: Blob; contentType: string; fileName: string };
+export type UploadFile = { blob: Blob; contentType: string; fileName: string };
+type Upload = UploadFile;
 type Presigned = { uploadUrl: string; key: string; publicUrl?: string };
 
 /** Tells the two payload shapes apart: only a 3D mask recording carries motion frames. */
@@ -66,13 +67,10 @@ function putFile(url: string, file: Upload, onBytes: (loaded: number) => void): 
 }
 
 /**
- * Uploads a clip (and the motion track of a 3D mask) to Cloudflare R2 through presigned URLs.
+ * Uploads files to Cloudflare R2 through presigned URLs and reports 0..1 across all of them.
  * `expiryTier` picks the key prefix that the bucket's lifecycle rule deletes on schedule.
- * `onProgress` receives 0..1 across all files.
  */
-async function upload(token: string, input: MediaInput, purpose: 'post' | 'snap', expiryTier: ExpiryTier, onProgress?: (fraction: number) => void): Promise<Presigned[]> {
-  const { media, motion } = planFiles(input);
-  const files = motion ? [media, motion] : [media];
+export async function uploadFiles(token: string, files: Upload[], purpose: 'post' | 'snap', expiryTier: ExpiryTier, onProgress?: (fraction: number) => void): Promise<Presigned[]> {
   const totalBytes = files.reduce((sum, f) => sum + f.blob.size, 0) || 1;
   const sent = new Map<Upload, number>();
   const report = () => onProgress?.(Math.min(1, [...sent.values()].reduce((a, b) => a + b, 0) / totalBytes));
@@ -88,6 +86,12 @@ async function upload(token: string, input: MediaInput, purpose: 'post' | 'snap'
     ),
   );
   return targets;
+}
+
+/** Uploads a clip (and the motion track of a 3D mask). */
+async function upload(token: string, input: MediaInput, purpose: 'post' | 'snap', expiryTier: ExpiryTier, onProgress?: (fraction: number) => void): Promise<Presigned[]> {
+  const { media, motion } = planFiles(input);
+  return uploadFiles(token, motion ? [media, motion] : [media], purpose, expiryTier, onProgress);
 }
 
 export async function uploadMedia(token: string, input: MediaInput, expiryTier: ExpiryTier, onProgress?: (fraction: number) => void): Promise<UploadedMedia> {

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Suspense } from 'react';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { BottomNav } from '@/components/BottomNav';
+import { UploadStatusPill } from '@/components/UploadStatusPill';
 import './globals.css';
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
         <Suspense fallback={null}>
           <BottomNav />
         </Suspense>
+        <UploadStatusPill />
       </body>
     </html>
   );
