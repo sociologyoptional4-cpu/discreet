@@ -10,6 +10,7 @@ import type { SocialActions } from '@/hooks/useSocialActions';
 import { useNegativeFeedback } from '@/hooks/useNegativeFeedback';
 import { STUDIO_BACKDROP } from '@/lib/avatars';
 import { playCue } from '@/lib/chat/spatialAudio';
+import { useVideoUpscaler } from '@/hooks/useVideoUpscaler';
 import { isCorsSafeMediaUrl } from '@/lib/media/corsSafe';
 import { isImageUrl } from '@/lib/media/mediaKind';
 import { attachVideo, markLive, playVideo, POOL_SIZE, setVideoMuted, VideoPoolContext, watchSilence } from '@/lib/media/videoPool';
@@ -29,6 +30,12 @@ export type FeedCardProps = {
   expanded: boolean;
   paused: boolean;
   soundOn: boolean;
+  /** What the sound control should show: the real state of the playing video, not only what was requested. */
+  soundShown: boolean;
+  /** Turns sound on, from inside the tap that asked for it. */
+  onRequestSound: () => void;
+  /** The browser refused to start this video; a tap starts it. */
+  playBlocked: boolean;
   social: SocialActions;
   onExpand: () => void;
   onCollapse: () => void;
@@ -129,8 +136,8 @@ export function FeedCard(props: FeedCardProps) {
       className="absolute inset-0 overflow-hidden bg-black text-white"
       {...longPress}
       onClick={() => {
-        if (!soundOn) {
-          onToggleSound();
+        if (!props.soundShown) {
+          props.onRequestSound();
           return;
         }
         onTogglePause();
@@ -197,7 +204,7 @@ export function FeedCard(props: FeedCardProps) {
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-gradient-to-b from-black/60 via-black/25 to-transparent" />
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-black/45 to-transparent" />
 
-      {paused && (
+      {(paused || props.playBlocked) && (
         <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 flex size-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-white/10 backdrop-blur-md"><Play className="size-8 fill-white" /></div>
       )}
 
@@ -223,7 +230,7 @@ export function FeedCard(props: FeedCardProps) {
             )}
           </p>
           <div className="mt-2 flex gap-2">
-            <SoundOrb soundOn={soundOn} playing={active && !paused} onToggle={onToggleSound} />
+            <SoundOrb soundOn={props.soundShown} playing={active && !paused} onToggle={onToggleSound} />
             <ShareOrb onShare={onShare} />
             {props.onOpenComments && (
               <CommentOrb count={props.commentsCount ?? item.comments_count ?? 0} onOpen={props.onOpenComments} />
@@ -261,6 +268,7 @@ function PostVideo({
   const video = pool?.[slot % POOL_SIZE] ?? null;
   const host = useRef<HTMLDivElement>(null);
   const [readyToShow, setReadyToShow] = useState(false);
+  useVideoUpscaler({ video, host, active });
 
   useLayoutEffect(() => {
     const el = host.current;

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef } from 'react';
+import { registerVybeMedia } from '@/lib/media/devHooks';
 import { feedPrefetcher } from '@/lib/media/feedPrefetcher';
 import { getTtffSamples, summarizeTtff } from '@/lib/media/ttff';
 
@@ -37,9 +38,8 @@ export function useFeedPrefetch<T>({ items, activeIndex, urlOf, startOffset = 2,
 
   useEffect(() => {
     feedPrefetcher.setPauseGate(() => gateRef.current?.() ?? false);
-    if (process.env.NODE_ENV !== 'production') {
-      (window as unknown as { __vybeMedia?: unknown }).__vybeMedia = { prefetcher: feedPrefetcher, ttff: { samples: getTtffSamples, summary: summarizeTtff } };
-    }
+    registerVybeMedia('prefetcher', feedPrefetcher);
+    registerVybeMedia('ttff', { samples: getTtffSamples, summary: summarizeTtff });
     return () => {
       feedPrefetcher.setPauseGate(null);
       feedPrefetcher.abortAll();

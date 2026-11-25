@@ -29,7 +29,7 @@ import { hapticTick } from '@/lib/haptics';
 import { feedPrefetcher } from '@/lib/media/feedPrefetcher';
 import { isImageUrl } from '@/lib/media/mediaKind';
 import { markSlideActive, recordFirstFrame } from '@/lib/media/ttff';
-import { bufferedAheadSeconds, createVideoPool, disposeVideoPool, liveVideo, unlockPool, VideoPoolContext } from '@/lib/media/videoPool';
+import { bufferedAheadSeconds, createVideoPool, disposeVideoPool, isAudible, liveVideo, resumeLiveVideo, unlockPool, unmuteLiveVideo, VideoPoolContext, watchPool } from '@/lib/media/videoPool';
 import type { FeedItem } from '@/types/social';
 
 const ACTIVE_RATIO = 0.6;
@@ -76,7 +76,6 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [videoPool] = useState(() => (typeof document === 'undefined' ? null : createVideoPool()));
   useEffect(() => () => { if (videoPool) disposeVideoPool(videoPool); }, [videoPool]);
-  const unlockAudio = () => { primeAudio(); if (videoPool) unlockPool(videoPool); };
   const { items, active, index: activeIndex, select, playback, notInterested } = useFeedEngine(initial, paginate, snapshot);
   useFeedPrefetch({
     items,
@@ -116,6 +115,19 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
   const [pausedId, setPausedId] = useState<string | null>(null);
   const [soundOn, setSoundOn] = useState(true);
+  const [audible, setAudible] = useState(false);
+  const [playBlocked, setPlayBlocked] = useState(false);
+  const unlockAudio = () => {
+    primeAudio();
+    if (!videoPool) return;
+    unlockPool(videoPool);
+    resumeLiveVideo(videoPool, soundOn);
+  };
+  /** Turning sound on happens right here, inside the tap, because browsers only allow it from a gesture. */
+  const requestSound = () => {
+    setSoundOn(true);
+    if (videoPool) unmuteLiveVideo(videoPool, () => setSoundOn(false));
+  };
   const [note, setNote] = useState<string | null>(null);
   const previousIndex = useRef<number | null>(null);
   const social = useSocialActions();
@@ -143,8 +155,27 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
   };
 
   const activeId = active?.id;
+  useEffect(() => {
+    if (!videoPool) return;
+    let timer: number | undefined;
+    const update = () => queueMicrotask(() => {
+      const live = liveVideo(videoPool);
+      setAudible(live ? isAudible(live) : false);
+      window.clearTimeout(timer);
+      if (live?.paused) timer = window.setTimeout(() => setPlayBlocked(liveVideo(videoPool)?.paused === true), 800);
+      else setPlayBlocked(false);
+    });
+    update();
+    const stop = watchPool(videoPool, update);
+    return () => { stop(); window.clearTimeout(timer); };
+  }, [videoPool, activeId, soundOn]);
   useEffect(() => { if (activeId) markSlideActive(activeId); }, [activeId]);
   const expanded = expandedId !== null;
+  const usesPooledVideo = active ? prefetchUrlOf(active) !== null : false;
+  const activePaused = pausedId !== null && pausedId === activeId;
+  /** What the sound control shows: for video posts the real state of the playing element, not just what was asked for. */
+  const soundShown = soundOn && (usesPooledVideo ? audible || activePaused : true);
+  const toggleSound = () => { if (soundShown) setSoundOn(false); else requestSound(); };
   const commentsOpen = commentsPostId !== null;
 
   useEffect(() => {
@@ -259,7 +290,7 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
 
   return (
     <VideoPoolContext.Provider value={videoPool}>
-    <div ref={rootRef} onPointerDownCapture={() => { unlockAudio(); wake(); }} onTouchStartCapture={unlockAudio}
+    <div ref={rootRef} onPointerDownCapture={() => { unlockAudio(); wake(); }} onPointerUpCapture={unlockAudio} onTouchStartCapture={unlockAudio} onTouchEndCapture={unlockAudio} onClickCapture={unlockAudio}
       className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-black text-white [--feed-accent-rgb:165_180_252]">
       {maskHost && active?.mode === 'mask' && createPortal(
         <>
@@ -299,11 +330,14 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
                 expanded={item.id === expandedId}
                 paused={pausedId === item.id}
                 soundOn={soundOn}
+                soundShown={soundShown}
+                onRequestSound={requestSound}
+                playBlocked={playBlocked && item.id === activeId && usesPooledVideo}
                 social={social}
                 onExpand={() => { setExpandedId(item.id); setSoundOn(true); }}
                 onCollapse={() => setExpandedId(null)}
                 onTogglePause={() => setPausedId((p) => (p === item.id ? null : item.id))}
-                onToggleSound={() => setSoundOn((on) => !on)}
+                onToggleSound={toggleSound}
                 onSoundBlocked={() => setSoundOn(false)}
                 onCounterTake={() => router.push(counterTakeUrl(item.topic_entity))}
                 onNotInterested={() => { notInterested(item); flash('Not interested'); }}
