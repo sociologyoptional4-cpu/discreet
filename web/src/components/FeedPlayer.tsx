@@ -289,10 +289,12 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
     react(emoji, x, y);
   };
 
-  /** Any touch brings the overlays back; they dim again after a stretch of uninterrupted watching. */
+  /** Any touch brings dimmed overlays back without forcing a re-render on every normal swipe. */
   const wake = () => {
-    setDimmed(false);
-    setTouchSeq((n) => n + 1);
+    if (dimmed) {
+      setDimmed(false);
+      setTouchSeq((n) => n + 1);
+    }
   };
 
   const jumpTo = (postId: string) => {
@@ -319,7 +321,9 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
         style={{ scrollSnapType: 'y mandatory', paddingBlock: PEEK_PX }}
       >
         {items.map((item, index) => {
-          const near = Math.abs(index - activeIndex) <= 1;
+          const dist = Math.abs(index - activeIndex);
+          const near = dist <= 1;
+          const mounted = dist <= 2;
           return (
           <article
             key={item.id}
@@ -332,7 +336,8 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
             className="relative w-full snap-center snap-always"
             style={{ height: `calc(100dvh - ${PEEK_PX * 2}px)`, marginBottom: GAP_PX }}
           >
-            <FeedCard
+            {mounted ? (
+              <FeedCard
                 item={item}
                 active={item.id === activeId}
                 near={near}
@@ -357,9 +362,12 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
                 commentsCount={commentCounts[item.id] ?? item.comments_count ?? 0}
                 onOpenComments={() => setCommentsPostId(item.id)}
               />
-            </article>
-            );
-          })}
+            ) : (
+              <div aria-hidden className="size-full bg-black" />
+            )}
+          </article>
+          );
+        })}
         </div>
       <AuroraEdgeGlow emotion={active?.emotion_tag} pulse={pulse} />
       <FeedGamificationHUD milestone={milestone} />
