@@ -1,12 +1,10 @@
 'use client';
-import { LayoutGroup } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MaskPlayback } from '@/components/MaskPlayback';
 import { fetchMotionTrack } from '@/lib/mocap/motionCodec';
 import { FeedCard } from '@/components/FeedCard';
-import { LiquidWarpCard } from '@/components/LiquidWarpCard';
 import { ComboBurstLayer, useComboBurst } from '@/components/chat/EmojiReactionSystem';
 import { AIFeedNudge, type FeedNudge } from '@/components/feed/AIFeedNudge';
 import { AuroraEdgeGlow } from '@/components/feed/AuroraEdgeGlow';
@@ -312,31 +310,29 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
             onPlayback={playback} />
         </>, maskHost,
       )}
-      <LayoutGroup>
-        <div
-          ref={scrollerRef}
-          role="feed"
-          aria-label="Posts"
-          tabIndex={0}
-          className={`h-dvh snap-y snap-mandatory overscroll-y-contain [scrollbar-width:none] focus-visible:outline-none ${expanded || commentsOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
-          style={{ scrollSnapType: 'y mandatory', paddingBlock: PEEK_PX }}
-        >
-          {items.map((item, index) => {
-            const near = Math.abs(index - activeIndex) <= 1;
-            return (
-            <article
-              key={item.id}
-              data-post-id={item.id}
-              onPlayingCapture={() => { if (item.id === activeId) { playback(true); recordFirstFrame(item.id, !!item.media_url && feedPrefetcher.isPrefetched(item.media_url)); } }}
-              onPauseCapture={() => { if (item.id === activeId) playback(false); }}
-              onWaitingCapture={() => { if (item.id === activeId) playback(false); }}
-              aria-posinset={index + 1}
-              aria-setsize={items.length}
-              className="relative w-full snap-center snap-always"
-              style={{ height: `calc(100dvh - ${PEEK_PX * 2}px)`, marginBottom: GAP_PX }}
-            >
-              <LiquidWarpCard axis="vertical" className="absolute inset-0" container={scrollerRef} disabled={item.id === expandedId}>
-              <FeedCard
+      <div
+        ref={scrollerRef}
+        role="feed"
+        aria-label="Posts"
+        tabIndex={0}
+        className={`h-dvh snap-y snap-mandatory overscroll-y-contain [scrollbar-width:none] focus-visible:outline-none ${expanded || commentsOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
+        style={{ scrollSnapType: 'y mandatory', paddingBlock: PEEK_PX }}
+      >
+        {items.map((item, index) => {
+          const near = Math.abs(index - activeIndex) <= 1;
+          return (
+          <article
+            key={item.id}
+            data-post-id={item.id}
+            onPlayingCapture={() => { if (item.id === activeId) { playback(true); recordFirstFrame(item.id, !!item.media_url && feedPrefetcher.isPrefetched(item.media_url)); } }}
+            onPauseCapture={() => { if (item.id === activeId) playback(false); }}
+            onWaitingCapture={() => { if (item.id === activeId) playback(false); }}
+            aria-posinset={index + 1}
+            aria-setsize={items.length}
+            className="relative w-full snap-center snap-always"
+            style={{ height: `calc(100dvh - ${PEEK_PX * 2}px)`, marginBottom: GAP_PX }}
+          >
+            <FeedCard
                 item={item}
                 active={item.id === activeId}
                 near={near}
@@ -361,12 +357,10 @@ export function FeedPlayer({ items: initial, paginate, snapshot }: Props) {
                 commentsCount={commentCounts[item.id] ?? item.comments_count ?? 0}
                 onOpenComments={() => setCommentsPostId(item.id)}
               />
-              </LiquidWarpCard>
             </article>
             );
           })}
         </div>
-      </LayoutGroup>
       <AuroraEdgeGlow emotion={active?.emotion_tag} pulse={pulse} />
       <FeedGamificationHUD milestone={milestone} />
       <EdgeEmojiArc rootRef={rootRef} onReact={arcReact} disabled={!active} />

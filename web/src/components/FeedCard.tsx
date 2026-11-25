@@ -1,5 +1,5 @@
 'use client';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
@@ -67,7 +67,6 @@ const stop = (event: MouseEvent): void => event.stopPropagation();
 export function FeedCard(props: FeedCardProps) {
   const { item, active, near, expanded, paused, soundOn, social, onExpand, onTogglePause, onToggleSound, onShare, onReact } = props;
   const longPress = useNegativeFeedback(props.onNotInterested);
-  const reduceMotion = useReducedMotion();
   const barRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const touchTrackRef = useRef<{ lastY: number; lastT: number; startT: number }>({ lastY: 0, lastT: 0, startT: 0 });
@@ -162,11 +161,8 @@ export function FeedCard(props: FeedCardProps) {
   };
 
   return (
-    <motion.div
+    <div
       ref={cardRef}
-      layout
-      transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 32 }}
-      style={{ borderRadius: 0 }}
       className="absolute inset-0 overflow-hidden bg-black text-white"
       {...longPress}
       onClick={() => {
@@ -281,7 +277,7 @@ export function FeedCard(props: FeedCardProps) {
           </div>
         </div>
       </header>
-    </motion.div>
+    </div>
   );
 }
 
