@@ -2,6 +2,7 @@ import {
   demoFeed, demoIsFollowing, demoLiked, demoProfileByName, demoProfilePosts, demoSearch, demoThumbnails, demoTrending, demoViewerProfile,
 } from '@/lib/demoData';
 import { nextFeedPage } from '@/lib/feedClient';
+import { rankFeedViaLocalPool } from '@/lib/localBrain/localBrainClient';
 import { currentUserId, ensureSession } from '@/lib/session';
 import { isDemoMode, supabase } from '@/lib/supabase';
 import type { FeedItem, Profile, PublicPost, SearchResult, Sentiment, TrendingTopic } from '@/types/social';
@@ -41,12 +42,18 @@ export async function withViewerState(posts: PublicPost[]): Promise<FeedItem[]> 
 /** Newest live posts. `focusPostId` (opened from search) is fetched separately and put first. */
 export async function fetchFeed(focusPostId?: string | null, topic?: string | null, snapshot = new Date().toISOString()): Promise<FeedItem[]> {
   if (isDemoMode) return withViewerState(demoFeed(topic, focusPostId));
-  let query = supabase.from('public_posts').select('*');
-  if (topic) query = query.eq('topic_entity', topic.trim().toLowerCase());
-  const latest = topic ? await query.order('likes_count', { ascending: false }).limit(FEED_PAGE)
-    : { data: (await nextFeedPage(snapshot, [], [], null)).posts, error: null };
-  if (latest.error) throw new Error('Could not load the feed.');
-  let posts = latest.data as PublicPost[];
+  let posts: PublicPost[] | null = null;
+  if (!topic) {
+    posts = await rankFeedViaLocalPool(FEED_PAGE).catch(() => null);
+  }
+  if (!posts) {
+    let query = supabase.from('public_posts').select('*');
+    if (topic) query = query.eq('topic_entity', topic.trim().toLowerCase());
+    const latest = topic ? await query.order('likes_count', { ascending: false }).limit(FEED_PAGE)
+      : { data: (await nextFeedPage(snapshot, [], [], null)).posts, error: null };
+    if (latest.error) throw new Error('Could not load the feed.');
+    posts = latest.data as PublicPost[];
+  }
 
   if (focusPostId && !posts.some((p) => p.id === focusPostId)) {
     const focus = await supabase.from('public_posts').select('*').eq('id', focusPostId).maybeSingle();

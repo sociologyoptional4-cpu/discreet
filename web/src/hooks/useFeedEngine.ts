@@ -13,6 +13,8 @@ import {
 } from '@/lib/feed/sessionContext';
 import { isDemoMode, supabase } from '@/lib/supabase';
 import { queueBrainSwipe, startBrainSignals } from '@/lib/brain/brainClient';
+import { computeSwipeReward } from '@/lib/brain/recursiveBrain';
+import { recordLocalSwipe } from '@/lib/localBrain/localBrainClient';
 import { startTelemetry, trackPost } from '@/lib/telemetry';
 import type { FeedItem, PublicPost } from '@/types/social';
 
@@ -106,14 +108,16 @@ export function useFeedEngine(initial: FeedItem[], paginate: boolean, snapshot: 
     const effectiveDurationMs = duration > 0 ? duration : 15_000;
     const watchRatio = effectiveWatchMs / effectiveDurationMs;
     const fastSkip = Boolean(swipeTo && state.visibleMs < 2000);
-    queueBrainSwipe({
+    const swipeSignal = {
       postId: state.item.id,
       watchRatio,
       rewatched: watchRatio >= 1.35,
       shared: false,
       liked: Boolean(state.item.liked),
       fastSkip,
-    });
+    };
+    queueBrainSwipe(swipeSignal);
+    void recordLocalSwipe(state.item.id, computeSwipeReward(swipeSignal));
 
     const itemMeta = state.item as FeedItem & { category?: string | null; key_points?: string[] | null };
     const updatedCtx = recordWatchedPost({
